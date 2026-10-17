@@ -1,0 +1,8 @@
+# Versions verified on Apple Silicon, Python 3.11, macOS (Oct 2026).
+# opencv-contrib-python is required by mediapipe; do not also install opencv-python.
+mediapipe==1.1.1
+opencv-contrib-python==5.0.0.93
+numpy==2.4.6
+scipy==1.17.1
+PyYAML==6.0.3
+pygame==2.6.1

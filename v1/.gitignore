@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# secrets + per-venue state
+.env
+calib.json
+transactions.jsonl
+
+# downloaded models (setup.sh fetches them)
+models/
+
+# Node
+node_modules/
+dist/
+
+# Editors
+.vscode/
+.idea/
+
+# Local captures and recordings
+captures/
+*.mp4
+*.mov

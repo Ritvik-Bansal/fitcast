@@ -1,0 +1,100 @@
+# Fitcast config. Every knob, one line each. Paths are relative to the repo root.
+
+# --- camera ---
+camera_index: 0                 # OpenCV camera index (0 is usually the first camera; Continuity Camera can shift it)
+camera_source: ""               # path to a video file to replay instead of the camera ("" = use camera_index)
+camera_width: 1280              # capture width in px (all pixel thresholds assume this ~720p frame)
+camera_height: 720              # capture height in px
+camera_fps: 30                  # requested camera frame rate; also the inference budget
+video_loop: true                # loop camera_source video files
+
+# --- models + inference ---
+pose_model: models/pose_landmarker_full.task     # pose model (full ~8 ms on M-series CPU; lite ~6 ms)
+segmenter_model: models/selfie_segmenter.tflite  # person segmenter used when mask_source is segmenter
+face_model: models/blaze_face_short_range.tflite # face detector run on the head crop as the front/back cue
+mask_source: segmenter          # where the person mask comes from: segmenter | pose | none
+seg_input_width: 256            # segmenter input width in px (frame is downscaled to this first)
+seg_threshold: 0.5              # person-probability cutoff for the binary mask
+seg_every_n_frames: 0           # run the segmenter every N frames (0 = auto: 1, or 2 if inference misses the budget)
+min_pose_confidence: 0.5        # MediaPipe detection/presence/tracking confidence
+min_visibility: 0.5             # keypoint visibility below this is treated as missing
+face_detect_every_n: 3          # run the head-crop face detector every N pose frames (0 = off)
+
+# --- smoothing + latency ---
+one_euro_min_cutoff: 1.0        # One Euro min cutoff (Hz): lower = steadier when standing still
+one_euro_beta: 0.02             # One Euro speed coefficient (per 720p px/s): higher = less lag when moving
+one_euro_d_cutoff: 1.0          # One Euro derivative cutoff (Hz)
+projector_latency_ms: 60        # look-ahead to cancel projector + pipeline lag (constant-velocity prediction)
+max_prediction_px: 30           # cap on the look-ahead displacement (720p px)
+lost_reset_ms: 500              # forget smoothing history after the person is gone this long
+
+# --- garments + fit ---
+garments_dir: assets/garments   # folder of garment folders
+catalog: []                     # garment folder names in swipe order ([] = every folder, alphabetical)
+garment_max_size: 1024          # garment PNGs are downscaled so their long side is at most this
+garment_scale: 1.0              # overall garment scale about the torso centre
+torso_width_scale: 1.15         # shirts: widen shoulders/hips, since real shirts are wider than the skeleton
+armpit_drop: 0.30               # shirts: armpit = this fraction of the way from shoulder to hip
+hem_drop: 0.05                  # shirts: hem sits this fraction of torso length below the hip joints
+collar_raise: 0.08              # shirts: collar = shoulder midpoint raised by this fraction of torso length
+pants_width_scale: 1.35         # pants: waist width relative to the hip-joint spacing
+waist_raise: 0.15               # pants: waistband sits this fraction of torso length above the hip joints
+crotch_drop: 0.0                # pants: extra crotch drop (fraction of thigh length) beyond the garment photo's own rise
+long_sleeve_elbow_frac: 0.47    # long sleeves: where the elbow hinge sits along the sleeve (0 = armhole, 1 = cuff)
+max_limb_stretch: 2.5           # sleeves/legs never stretch beyond this many times their photo length
+
+# --- mask + light ---
+mask_dilate_px: 8               # grow the person mask so loose clothing edges still get garment
+mask_feather_px: 7              # soften the mask edge (px)
+head_exclusion_scale: 1.4       # size of the never-project circle over the head (always on, eye safety)
+garment_brightness: 0.9         # projector brightness of the garment (lower if the camera exposure hunts)
+fade_out_ms: 300                # garment fade-out when the person is lost
+fade_in_ms: 150                 # garment fade-in when the person appears
+startup_blank_ms: 1500          # project nothing for this long at start so camera exposure settles
+
+# --- orientation ---
+orientation_hysteresis_deg: 15  # extra degrees past a bucket edge before the view may change
+orientation_hold_ms: 250        # the new view must persist this long before switching
+view_crossfade_ms: 150          # crossfade between front/side/back images
+shoulder_ratio_ref: 0.70        # shoulder width / torso length when square to the camera (auto-adapts)
+orientation_z_sign: 1.0         # flip to -1 if left/right side views come out swapped
+orientation_z_deadband: 0.06    # ignore world-z shoulder differences smaller than this (torso lengths)
+face_front_threshold: 0.5       # face cue above this = facing the camera
+face_back_threshold: 0.2        # face cue below this = facing away
+
+# --- gestures ---
+gestures_front_only: true       # only accept gestures while facing the camera
+swipe_speed_px_s: 1000          # swipe: wrist speed relative to torso (720p px/s)
+swipe_min_distance_px: 110      # swipe: minimum sideways travel (720p px)
+swipe_window_ms: 160            # swipe: time window the speed is measured over
+swipe_debounce_ms: 800          # swipe: minimum time between swipes
+swipe_left_is_next: true        # swipe toward the wearer's own left = next garment (false: toward right = next)
+raise_hold_ms: 500              # raise hand: wrist above nose this long toggles shirt/pants
+raise_debounce_ms: 1500         # raise hand: minimum time between toggles
+palm_hold_ms: 1500              # palm hold: wrist still between shoulder and nose this long = checkout
+palm_still_speed_px_s: 140      # palm hold: wrist counts as still below this speed (720p px/s)
+gesture_cooldown_ms: 600        # no gesture fires within this long after any other gesture
+turn_rate_suppress: 0.8         # block gestures while the body turns faster than this (shoulder-ratio units/s)
+
+# --- projector + windows ---
+calib_path: calib.json          # camera->projector homography file written by tools/calibrate.py
+projector_width: 1920           # projector frame width
+projector_height: 1080          # projector frame height
+projector_display: -1           # display index for the projector (-1 = first non-main display)
+projector_backend: auto         # auto (cv2, falling back to pygame) | cv2 | pygame
+projector_allow_main_display: false  # allow the projector window on the laptop screen (testing without a projector)
+debug_window_width: 1280        # laptop debug window width
+debug_every_n_when_projecting: 2  # while projecting, refresh the laptop window every Nth frame (macOS window redraws are slow)
+show_debug_overlays: true       # start with keypoints/HUD visible (toggle with d)
+ui_scale: 1.0                   # size of projected text, ring and receipt
+
+# --- checkout ---
+currency: USD                   # currency sent with payments
+checkout_display_ms: 3000       # how long the paid/declined receipt stays up
+checkout_mock_latency_ms: 900   # simulated processor latency of the mock Visa endpoint
+checkout_mock_decline_rate: 0.0 # fraction of mock payments that decline (to demo the failure path)
+transactions_path: transactions.jsonl  # every payment attempt is appended here
+env_path: .env                  # where VISA_API_KEY / VISA_SHARED_SECRET / VISA_MERCHANT_ID are read from
+
+# --- perf ---
+profile_print_after_s: 5        # print one per-stage timing summary to the console after this many seconds
