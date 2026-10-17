@@ -1,0 +1,146 @@
+{
+  "front": {
+    "collar": [
+      575.0,
+      155.0
+    ],
+    "left_shoulder": [
+      770.0,
+      150.0
+    ],
+    "right_shoulder": [
+      380.0,
+      150.0
+    ],
+    "left_armpit": [
+      745.0,
+      360.0
+    ],
+    "right_armpit": [
+      405.0,
+      360.0
+    ],
+    "left_hem": [
+      740.0,
+      950.0
+    ],
+    "right_hem": [
+      410.0,
+      950.0
+    ],
+    "left_sleeve_end": [
+      985.3,
+      766.6
+    ],
+    "right_sleeve_end": [
+      164.7,
+      766.6
+    ]
+  },
+  "back": {
+    "collar": [
+      575.0,
+      124.0
+    ],
+    "left_shoulder": [
+      380.0,
+      150.0
+    ],
+    "right_shoulder": [
+      770.0,
+      150.0
+    ],
+    "left_armpit": [
+      405.0,
+      360.0
+    ],
+    "right_armpit": [
+      745.0,
+      360.0
+    ],
+    "left_hem": [
+      410.0,
+      950.0
+    ],
+    "right_hem": [
+      740.0,
+      950.0
+    ],
+    "left_sleeve_end": [
+      164.7,
+      766.6
+    ],
+    "right_sleeve_end": [
+      985.3,
+      766.6
+    ]
+  },
+  "left": {
+    "collar": [
+      220.0,
+      140.0
+    ],
+    "left_shoulder": [
+      220.0,
+      140.0
+    ],
+    "right_shoulder": [
+      220.0,
+      140.0
+    ],
+    "left_armpit": [
+      220.0,
+      360.0
+    ],
+    "right_armpit": [
+      220.0,
+      360.0
+    ],
+    "left_hem": [
+      110.0,
+      950.0
+    ],
+    "right_hem": [
+      330.0,
+      950.0
+    ],
+    "left_sleeve_end": [
+      220.0,
+      910.0
+    ]
+  },
+  "right": {
+    "collar": [
+      220.0,
+      140.0
+    ],
+    "right_shoulder": [
+      220.0,
+      140.0
+    ],
+    "left_shoulder": [
+      220.0,
+      140.0
+    ],
+    "right_armpit": [
+      220.0,
+      360.0
+    ],
+    "left_armpit": [
+      220.0,
+      360.0
+    ],
+    "left_hem": [
+      110.0,
+      950.0
+    ],
+    "right_hem": [
+      330.0,
+      950.0
+    ],
+    "right_sleeve_end": [
+      220.0,
+      910.0
+    ]
+  }
+}
