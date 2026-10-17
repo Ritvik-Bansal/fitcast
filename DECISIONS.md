@@ -31,3 +31,5 @@
 - Gallery panel pixels are cleared against the dilated person mask (not just clothes) so a swiping hand entering the panel is not lit.
 - Prediction horizon follows the measured capture->display latency (`smoothing.predict_auto`), clamped to `predict_max_ms`.
 - Keys: `d` is debug-overlay only (was also 'next'); outfit keys are arrows + n/p.
+- `mp.Image(..., data=arr)` copies `arr` (checked: zeroing the source after construction leaves `numpy_view()` intact), so the double-buffered RGB handoff to the segmenter worker cannot race even when submits are skipped.
+- Demo idle timer resets on operator input (keys, swipes) only; `set_outfit` itself must not reset it or the auto-cycle waits `idle_s` between every change.

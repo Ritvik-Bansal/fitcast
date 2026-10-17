@@ -163,6 +163,7 @@ See `PROGRESS.md` for the raw logs. Summary:
 | Render + compose + projector warp | ~7.5 |
 | **Main-loop step, live-equivalent (threaded capture, segmenter in worker thread)** | **25.5 mean / 33.6 p95 -> ~39 fps capacity** |
 | Offline review run (sync 4K decode + review video encode included) | 33 -> 30 fps |
+| 2-minute soak, looping white clip, final code | 30.1 -> 33.2 fps, 3986 frames, no crash |
 
 The test clips are 25 fps, so an offline run can never show more than 25 fps achieved; the
 "capacity" number is what the loop can sustain with a 30/60 fps camera.

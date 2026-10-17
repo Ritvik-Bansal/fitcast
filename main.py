@@ -131,7 +131,6 @@ class App:
         g = self.gallery
         g.prev_index, g.index = g.index, idx % len(g.outfits)
         g.changed_at = now
-        self.last_gesture_t = now          # any outfit change (key or swipe) resets the demo idle timer
         log.info("outfit -> %s", g.current.name)
 
     def handle_key(self, k: int, now: float) -> bool:
@@ -142,8 +141,10 @@ class App:
             return False
         if k in KEY_NEXT:
             self.set_outfit(self.gallery.index + 1, now)
+            self.last_gesture_t = now          # operator input resets the demo idle timer (auto-cycle must not)
         elif k in KEY_PREV:
             self.set_outfit(self.gallery.index - 1, now)
+            self.last_gesture_t = now
         elif k == ord("m"):
             self.tracker.cycle_mask_mode()
         elif k == ord("d"):

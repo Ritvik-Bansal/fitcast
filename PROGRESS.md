@@ -66,3 +66,9 @@ Each milestone: what was run, what was observed.
 - Fixed MINORs: side-state texture by shoulder order, torso fill minus skin class, gallery cleared against the person mask, head box grown by the prediction shift (test), demo idle timer resets on keyboard changes, predict horizon = measured latency, per-frame allocations (accumulateWeighted, threshold into buffers, double-buffered mask/RGB, precomputed kernel, bounded stats), hard-coded tunables moved to config (`taper`, `bottom_knee_frac`, `neck_raise_frac`, `search_window_frac`, `side_width_floor_frac`, class ids, `ref_warmup_frames`, `ref_jump_frac`), CLAUDE.md contract updated (person_mask, now=, size_table=, allow_simulated).
 - Not done from the review: Gray-code Level 2 (stretch), inseam is still hip->knee->ankle (labelled as an estimate), mask lag vs. predicted joints is documented not compensated, `_DEFAULTS` dicts in sizing/calibration/gestures remain (config has every key now).
 - After fixes: 62 tests pass; white 586 frames 30.8 fps, pink 310 frames 30.3 fps (offline incl. decode); live camera 8 s 29.5 fps; rtmlib 25 fps.
+
+## Final soak on shipped code (2026-10-17, commit after review fixes)
+- `main.py --source assets/test/white_turn.mp4 --no-window --loop --max-seconds 120 --outfit 6 --calibration calibration_sim.yaml`: 3986 frames in 120.0 s = 33.2 fps, no crash, no error lines. Loop 30.1 ms incl. sync 4K decode; pose 6.3 ms, seg 9.1 ms every 2nd frame (worker), render+compose+warp 7.8 ms, latency 18 ms.
+- Demo auto-cycle re-verified after the idle-timer fix: changes at 1.99, 3.0, 4.01 ... 9.08 s with idle 2 s / cycle 1 s.
+- `mp.Image` verified to copy its input (double-buffer handoff is race-free).
+- 62 tests pass.
