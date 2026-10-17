@@ -1,0 +1,10 @@
+# Verified installing + importing on Apple Silicon, macOS 26, Python 3.11.15 (2026-10-17).
+# Create env:  uv venv --python 3.11 .venv && uv pip install --python .venv/bin/python -r requirements.txt
+mediapipe==1.1.1
+opencv-contrib-python==5.0.0.93
+numpy==2.4.6
+pyyaml==6.0.3
+onnxruntime==1.31.0
+pyobjc-framework-Cocoa==12.2.2
+pytest==9.1.1
+# Optional RTMPose backend: see requirements-rtm.txt (must be installed with --no-deps).

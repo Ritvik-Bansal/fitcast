@@ -1,0 +1,5 @@
+# Optional rtmlib (RTMPose) backend. Install with --no-deps: rtmlib's metadata pulls
+# opencv-python, which clashes with opencv-contrib-python already in requirements.txt.
+#   uv pip install --python .venv/bin/python --no-deps -r requirements-rtm.txt
+rtmlib==0.0.16
+tqdm==4.70.1

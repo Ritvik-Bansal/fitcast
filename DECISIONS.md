@@ -1,0 +1,25 @@
+# Decisions (one line each, newest last)
+
+- Repo root is the FitCast root (clips were already at `assets/test/`); old rad-AR README moved to `ios/README.md`.
+- MediaPipe 1.1.1 is what pip resolves for py3.11 on arm64; Tasks API (`PoseLandmarker`, `ImageSegmenter`) unchanged from 0.10.x, verified by running it.
+- Own vectorized One Euro filter over the (33,2) array instead of the `OneEuroFilter` PyPI package: that package is frequency-based (no timestamps) and would need 66 objects per frame.
+- Nose/eye visibility is NOT used as the primary back signal: MediaPipe reports ~0.98 visibility from behind on both clips. Shoulder order + width ratio decide; visibility is only a weak confirmer (threshold in config).
+- Clothes mask is gated by the pose model's own person mask (`output_segmentation_masks=True`, +0.4 ms): the selfie segmenter labels background patches as "clothes" on the gray backdrop.
+- Resize 4K->720p happens inside the capture thread with INTER_AREA (6 ms) so it overlaps model inference; INTER_LINEAR (0.4 ms) is selectable in config.
+- rtmlib is an optional backend installed with `--no-deps` (its deps drag in a second OpenCV wheel). Its ONNX models are pre-downloaded by `scripts/download_models.py`; lightweight mode (16 ms) is the only one fast enough, balanced is 70 ms.
+- Landmark "visible" = visibility >= threshold AND inside the frame by a margin: knees below the frame edge still report 0.68 visibility.
+- Gallery panel is drawn in camera space (per spec) and warped with the rest; text blurs slightly but keeps one coordinate system and makes the "never overlap the person" check trivial.
+- Sizing: chest is measured as a front-on width from the mask; the chart bounds are circumferences, so `sizing.chest_circumference_factor` (2.65) converts for both the chart lookup and the panel text.
+- Sizing: on clips cropped above the knee the shoulder->hip span sets the scale, so the reported torso length is height x ratio, not a measurement.
+- Calibration rescale (stored camera size != runtime size) uses cv2.resize's pixel-centre mapping x' = (x+0.5)*s - 0.5, not diag(s,s,1).
+- `set_homography` reports RMS over all points; RANSAC rejections and inlier-only RMS go to the log so a mis-click is visible.
+- The live calibration tool calls the same pure functions as `run_calibration` (capture_pattern, detect_markers, set_homography, verify_grid) so manual fallback and the gallery-rect step fit between detect and verify; `--simulate` and tests cover those functions.
+- Gestures: a swipe needs >= `min_samples` buffered samples so a single-frame landmark jump cannot fire one.
+- Garments: backs are made by pattern-aligned patch copy plus inpainted seams; plain `cv2.inpaint` smears stripes and plaid.
+- Garments: `top_body_region` y-range is the garment's own alpha extent (imports are fitted with transparent padding, not stretched).
+- Garments: the sleeve tile is sampled from the generated back so graphics/pockets never land on the arms; pants textures fill their width because the renderer splits legs at x = 0.5.
+- Garments: the dress keeps a hip-level body region (bodice + top of skirt); a full skirt needs a leg-aware renderer part, deferred.
+- `assets/garments/` is git-ignored (10 MB, rebuilt in <2 s); `main.py` regenerates the demo set automatically when the folder is empty.
+- Mask `intersect` mode also unions (pose person-mask ∩ torso polygon): on white-on-gray side views the selfie segmenter drops chunks of the shirt side; the torso is always fabric so this is a safe fill (config `mask.torso_fill`).
+- Fallback reference area is the previous frame's area (not an EMA) and 0 means 'no mask yet', otherwise the async segmenter's first result looked like a 400% jump and the skeleton fallback stuck forever.
+- Segmentation runs in a worker thread (`seg_async`): one-frame mask lag, ~9 ms/frame hidden; `SegWorker` must not name a field `_stop` (shadows Thread._stop).

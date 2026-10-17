@@ -10,3 +10,11 @@ dist/
 xcuserdata/
 DerivedData/
 *.xcuserstate
+# FitCast
+assets/models/
+out/
+calibration.yaml
+*.mp4
+!assets/test/*.mp4
+.pytest_cache/
+assets/garments/
