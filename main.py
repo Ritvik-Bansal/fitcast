@@ -33,13 +33,14 @@ from fitcast.types import GalleryState
 
 log = logging.getLogger("fitcast")
 
-KEY_PREV = {2, 63234, 65361, ord("a"), ord("p")}
-KEY_NEXT = {3, 63235, 65363, ord("d"), ord("n")}
+KEY_PREV = {2, 63234, 65361, ord("p")}        # left arrow (Cocoa / waitKeyEx / X11), p
+KEY_NEXT = {3, 63235, 65363, ord("n")}        # right arrow, n
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="FitCast projection-mapped virtual try-on")
     ap.add_argument("--config", default="config.yaml")
+    ap.add_argument("--calibration", help="calibration yaml to load (default: config calibration.file)")
     ap.add_argument("--source", help="camera index or video file (default: config capture.source)")
     ap.add_argument("--list-cameras", action="store_true", help="print capture devices and exit")
     ap.add_argument("--demo", action="store_true", help="fullscreen projector, auto-cycle outfits, auto-recover")
@@ -88,7 +89,7 @@ class App:
         self.renderer = Renderer(cfg["renderer"], self.size, tcfg["min_visibility"])
         self.compositor = Compositor(cfg["compositor"], self.size)
         self.calib = Calibration(cfg["calibration"], self.size)
-        self.calib.load()
+        self.calib.load(args.calibration, allow_simulated=self.source.is_file)   # a fake homography is fine for clips, never live
         if self.calib.ok and getattr(self.calib.data, "gallery_rect", None):
             self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
         self.gestures = GestureDetector(cfg["gestures"])
@@ -115,13 +116,22 @@ class App:
         self.last_cycle_t = time.perf_counter()
         self.frames = 0
         self.gesture_log: list[tuple[float, str]] = []
-        self._stats = {"pose": [], "seg": [], "render": [], "loop": []}
+        from collections import deque
+        self._stats = {k: deque(maxlen=int(cfg["logging"]["stats_window"])) for k in ("pose", "seg", "render", "loop")}
+        self._black = np.zeros((int(cfg["calibration"]["projector_height"]), int(cfg["calibration"]["projector_width"]), 3), np.uint8)
+        self._stale = False
+        self.stale_s = float(cfg["capture"]["stale_ms"]) / 1000.0
+        self.stall_exit_s = float(cfg["capture"]["stall_exit_s"])
+        self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
+        self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
+        self._lat_ema = float(cfg["smoothing"]["predict_ms"])
 
     # -- outfit control -----------------------------------------------------------------------
     def set_outfit(self, idx: int, now: float) -> None:
         g = self.gallery
         g.prev_index, g.index = g.index, idx % len(g.outfits)
         g.changed_at = now
+        self.last_gesture_t = now          # any outfit change (key or swipe) resets the demo idle timer
         log.info("outfit -> %s", g.current.name)
 
     def handle_key(self, k: int, now: float) -> bool:
@@ -141,13 +151,14 @@ class App:
         elif k == ord("f"):
             self.display.toggle_fullscreen()
         elif k == ord("c"):
+            # 'c' = re-capture the frontal reference + sizing (projector recalibration is scripts/calibrate.py, 'r' reloads it)
             log.info("re-capturing frontal reference; stand facing the mirror")
             self.tracker.reset_reference()
             self.sizing.reset()
         elif k == ord("g"):
             self.gallery.visible = not self.gallery.visible
         elif k == ord("r"):
-            if self.calib.load():
+            if self.calib.load(self.args.calibration, allow_simulated=self.source.is_file):
                 if self.calib.data.gallery_rect:
                     self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
                 log.info("calibration reloaded")
@@ -174,16 +185,25 @@ class App:
         try:
             while running:
                 item = self.source.read()
-                if item is None:
+                if item is None or item[2] == last_seq:
                     if a.no_window:
                         break
-                    self.handle_key(self.display.key(5), time.perf_counter())
+                    now = time.perf_counter()
+                    age = now - (item[1] if item is not None else t_start)
+                    if age > self.stale_s:
+                        # SAFETY: never hold a stale garment frame on the projector while the person may move
+                        if not self._stale:
+                            log.error("no new camera frame for %.1f s: projector blanked", age)
+                            self._stale = True
+                        self.display.show_projector(self._black)
+                    if age > self.stall_exit_s:
+                        log.error("camera stalled for %.0f s; exiting. Check the cable / Continuity Camera and restart.", age)
+                        break
+                    running = self.handle_key(self.display.key(5 if item is None else 1), now)
                     continue
                 frame, ts, seq = item
-                if seq == last_seq:
-                    running = self.handle_key(self.display.key(1), time.perf_counter())
-                    continue
                 last_seq = seq
+                self._stale = False
                 now = time.perf_counter()
                 self.step(frame, ts, now)
                 self.frames += 1
@@ -232,6 +252,10 @@ class App:
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)
         self.latency_ms = (time.perf_counter() - ts) * 1e3
+        if self.predict_auto:
+            # predict forward by the measured capture->display latency (clamped), per spec 4.3
+            self._lat_ema = 0.9 * self._lat_ema + 0.1 * min(self.latency_ms, self.predict_max_ms)
+            self.smoother.set_predict_ms(self._lat_ema)
         tm = self.tracker.timings
         self._stats["pose"].append(tm.get("pose_ms", 0.0))
         self._stats["seg"].append(tm.get("seg_ms", 0.0))

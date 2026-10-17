@@ -56,8 +56,10 @@ def box_erode(src: np.ndarray, k: tuple[int, int], dst: np.ndarray, tmp: np.ndar
 class FacingClassifier:
     """front / back / side from shoulder order and normalised shoulder width, with hysteresis.
 
-    Width is normalised by torso length when hips are visible so stepping toward the camera does
-    not change the ratio. Reference = running max captured during warm-up, then updated slowly.
+    Two references are kept: `ref_norm` (shoulder width / torso length, used whenever both hips are
+    visible, distance-invariant) and `ref_px` (raw px, used when the hips are out of frame). Each is a
+    running max captured over its own warm-up, then updated slowly; a width more than `ref_jump_frac`
+    above the reference is adopted immediately (a session that started side-on).
     """
 
     def __init__(self, cfg: dict) -> None:
@@ -65,8 +67,9 @@ class FacingClassifier:
         self.side_ratio = float(cfg["side_ratio"])
         self.hold = int(cfg["hold_frames"])
         self.rate = float(cfg["ref_update_rate"])
-        self.decay = float(cfg.get("ref_decay_rate", 0.0005))
-        self.warmup = int(cfg.get("ref_warmup_frames", 30))
+        self.decay = float(cfg["ref_decay_rate"])
+        self.warmup = int(cfg["ref_warmup_frames"])
+        self.jump = float(cfg["ref_jump_frac"])
         self.face_thr = float(cfg["face_vis_back_threshold"])
         self.reset()
 
@@ -74,30 +77,37 @@ class FacingClassifier:
         self.state = "front"
         self._cand = "front"
         self._count = 0
-        self.ref = 0.0          # normalised reference width
-        self.ref_px = 0.0       # reference shoulder width in px (for sizing / rendering)
-        self._n = 0
+        self.ref_norm = 0.0
+        self.ref_px = 0.0
+        self._n_norm = 0
+        self._n_px = 0
         self.ratio = 1.0
+
+    def _advance(self, ref: float, n: int, width: float) -> float:
+        if ref <= 0.0 or n <= self.warmup or width > ref * self.jump:
+            return max(ref, width)
+        if width > ref:
+            return ref + self.rate * (width - ref)
+        if self.state != "side":
+            return ref - self.decay * (ref - width)
+        return ref
 
     def update(self, joints: np.ndarray, vis: np.ndarray, min_vis: float) -> str:
         """Feed one frame of (33,3) joints + visibility; returns the (hysteresis-filtered) state."""
         ls, rs = joints[L_SHOULDER, :2], joints[R_SHOULDER, :2]
         sw = float(np.hypot(*(ls - rs)))
         hips_ok = vis[L_HIP] >= min_vis and vis[R_HIP] >= min_vis
-        norm = geo.torso_length(joints) if hips_ok else 1.0
-        width = sw / norm if norm > 1e-3 else sw
-        self._n += 1
-        # reference: fast running max during warm-up, then slow updates
-        if self.ref <= 0 or self._n <= self.warmup:
-            if width > self.ref:
-                self.ref, self.ref_px = width, sw
-        elif width > self.ref:
-            self.ref += self.rate * (width - self.ref)
-            self.ref_px += self.rate * (sw - self.ref_px)
-        elif self.state != "side":
-            self.ref -= self.decay * (self.ref - width)
-            self.ref_px -= self.decay * (self.ref_px - sw)
-        self.ratio = width / self.ref if self.ref > 1e-6 else 1.0
+        self._n_px += 1
+        self.ref_px = self._advance(self.ref_px, self._n_px, sw)
+        if hips_ok:
+            norm = geo.torso_length(joints)
+            width = sw / norm if norm > 1e-3 else sw
+            self._n_norm += 1
+            self.ref_norm = self._advance(self.ref_norm, self._n_norm, width)
+            ref = self.ref_norm
+        else:
+            width, ref = sw, self.ref_px
+        self.ratio = width / ref if ref > 1e-6 else 1.0
         if self.ratio < self.side_ratio:
             cand = "side"
         else:
@@ -125,8 +135,8 @@ def draw_skeleton_mask(out: np.ndarray, joints: np.ndarray, vis: np.ndarray, sw:
     if vis[L_SHOULDER] < min_vis or vis[R_SHOULDER] < min_vis:
         return out
     if vis[L_HIP] >= min_vis and vis[R_HIP] >= min_vis:
-        quad = geo.torso_quad(joints, sw, cfg["torso_margin_frac"], 0.05, cfg["hem_drop_frac"],
-                              min_width=cfg.get("min_torso_width_frac", 0.7) * sw)
+        quad = geo.torso_quad(joints, sw, cfg["torso_margin_frac"], cfg["neck_raise_frac"], cfg["hem_drop_frac"],
+                              min_width=cfg["min_torso_width_frac"] * sw)
         cv2.fillConvexPoly(out, np.round(quad).astype(np.int32), 255)
     widths = {"upper": cfg["upper_arm_width_frac"], "fore": cfg["forearm_width_frac"],
               "thigh": cfg["thigh_width_frac"], "shin": cfg["shin_width_frac"]}
@@ -159,7 +169,7 @@ def compute_head_box(joints: np.ndarray, vis: np.ndarray, sw: float, cfg: dict, 
     y1 = max(sh_y - cfg["bottom_gap_frac"] * sw, fy1 + m_min)
     # union with segmentation evidence above the shoulder line, near the face
     cx = 0.5 * (fx0 + fx1)
-    win = 0.75 * sw
+    win = cfg["search_window_frac"] * sw
     row1 = int(np.clip(sh_y, 0, H))
     cx0, cx1 = int(np.clip(cx - win, 0, W)), int(np.clip(cx + win, 0, W))
     for m in (person_mask, hair_face_mask):
@@ -243,9 +253,14 @@ class MediaPipeBackend:
         cat = r.category_mask.numpy_view()
         return cat[:, :, 0] if cat.ndim == 3 else cat
 
-    def image_copy(self, frame_bgr: np.ndarray):
-        """A standalone mp.Image (own RGB buffer) safe to hand to another thread."""
-        return self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
+    def image_copy(self, frame_bgr: np.ndarray, buf: tuple | None = None) -> tuple:
+        """(mp.Image, rgb buffer) with its own RGB memory, safe to hand to the worker thread.
+        Pass the previous tuple for that slot back in to reuse its buffer (double-buffering)."""
+        rgb = None if buf is None else buf[1]
+        if rgb is None or rgb.shape != frame_bgr.shape:
+            rgb = np.empty_like(frame_bgr)
+        cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB, dst=rgb)
+        return self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb), rgb
 
     def close(self) -> None:
         self.pose.close()
@@ -305,6 +320,7 @@ class SegWorker(threading.Thread):
         self._result: np.ndarray | None = None
         self._quit = False
         self.busy = False
+        self.failed = False
         self.last_ms = 0.0
 
     def submit(self, img, ms: int) -> bool:
@@ -337,7 +353,13 @@ class SegWorker(threading.Thread):
                 img, ms = self._req
                 self._req = None
             t0 = time.perf_counter()
-            cat = self.backend.segment_image(img, ms).copy()
+            try:
+                cat = self.backend.segment_image(img, ms).copy()
+            except Exception:  # noqa: BLE001 - must never die silently
+                log.exception("segmenter worker crashed; tracker switches to synchronous segmentation")
+                with self._cv:
+                    self.failed, self.busy = True, False
+                return
             self.last_ms = (time.perf_counter() - t0) * 1e3
             with self._cv:
                 self._result, self.busy = cat, False
@@ -378,7 +400,7 @@ class Tracker:
         self.k_skel = _ksize(mcfg["skeleton"]["dilate_px"])
         self.gate_thr = float(mcfg["person_gate_threshold"])
         self.area_jump = float(mcfg["area_jump_fallback"])
-        self.torso_fill = bool(mcfg.get("torso_fill", True))
+        self.torso_fill = bool(mcfg["torso_fill"])
         self.fallback_hold = int(mcfg["fallback_hold_frames"])
         self.facing = FacingClassifier(cfg["facing"])
         self.head_cfg = cfg["head"]
@@ -391,6 +413,14 @@ class Tracker:
         self._tmp2 = np.zeros((self.H, self.W), np.uint8)
         self._hairface = np.zeros((self.H, self.W), np.uint8)
         self._pf = np.zeros((self.H, self.W), np.float32)
+        self._out = [np.zeros((self.H, self.W), np.uint8), np.zeros((self.H, self.W), np.uint8)]
+        self._rgb_buf = [None, None]
+        self._flip = 0
+        self.hair_class = int(mcfg["hair_class"])
+        self.face_class = int(mcfg["face_class"])
+        self.skin_class = int(mcfg["body_skin_class"])
+        self.side_width_floor = float(cfg["head"]["side_width_floor_frac"])
+        self.torso_fill_hem_frac = float(mcfg["torso_fill_hem_frac"])
         self._n = 0
         self._prev_area = -1.0
         self._fallback_left = 0
@@ -434,9 +464,14 @@ class Tracker:
 
         # segmentation (every N frames; reuse previous category mask otherwise)
         seg_ms = 0.0
+        if self.worker is not None and self.worker.failed:
+            log.error("segmenter worker failed; continuing with synchronous segmentation (slower)")
+            self.worker = None
         if self.worker is not None:
             if (self._n - 1) % self.seg_every == 0:
-                self.worker.submit(self.backend.image_copy(frame_bgr), ms)
+                self._flip ^= 1
+                self._rgb_buf[self._flip] = self.backend.image_copy(frame_bgr, self._rgb_buf[self._flip])
+                self.worker.submit(self._rgb_buf[self._flip][0], ms)
             cat = self.worker.latest()
             if cat is not None:
                 np.copyto(self._cat, cat)
@@ -448,14 +483,13 @@ class Tracker:
         sw = geo.shoulder_width(joints)
         facing = self.facing.update(joints, vis, self.min_vis)
         ref_px = self.facing.ref_px or sw
-        sw_for_size = max(sw, 0.7 * ref_px)
+        sw_for_size = max(sw, self.side_width_floor * ref_px)
 
         # person gate: pose segmentation (dilated) or the skeleton when the backend has none
         skel_cfg = self.cfg["mask"]["skeleton"]
         draw_skeleton_mask(self._skel, joints, vis, sw_for_size, skel_cfg, self.min_vis)
         if person is not None:
             cv2.threshold(person, self.gate_thr, 255, cv2.THRESH_BINARY, dst=self._pf)
-            self._pf.astype(np.uint8, copy=False)
             np.copyto(self._tmp, self._pf, casting="unsafe")
             box_dilate(self._tmp, self.k_gate, self._gate, self._tmp2)
             self.last_person_mask = self._gate
@@ -485,29 +519,34 @@ class Tracker:
         mode = self.mask_mode
         if mode == "intersect" and self.fallback_active:
             mode = "skeleton"
+        mask = self._out[self._n & 1]          # alternate two output buffers: no per-frame allocation
         if mode == "clothes":
-            mask = self._clothes.copy()
+            np.copyto(mask, self._clothes)
         elif mode == "skeleton":
-            mask = self._skel.copy()
+            np.copyto(mask, self._skel)
         else:
             box_dilate(self._skel, self.k_skel, self._tmp, self._tmp2)
-            mask = cv2.bitwise_and(self._clothes, self._tmp)
+            cv2.bitwise_and(self._clothes, self._tmp, dst=mask)
             if self.torso_fill and person is not None and vis[L_HIP] >= self.min_vis and vis[R_HIP] >= self.min_vis:
-                # torso polygon ∩ (eroded) person mask: the torso is always fabric, so fill segmenter holes there
+                # torso polygon ∩ (eroded) person mask minus segmenter skin: fills segmenter holes on fabric only
                 self._tmp.fill(0)
-                core = geo.torso_quad(joints, sw_for_size, 0.0, 0.0, skel_cfg["hem_drop_frac"] * 0.5,
-                                      min_width=skel_cfg.get("min_torso_width_frac", 0.7) * sw_for_size)
+                core = geo.torso_quad(joints, sw_for_size, 0.0, 0.0, skel_cfg["hem_drop_frac"] * self.torso_fill_hem_frac,
+                                      min_width=skel_cfg["min_torso_width_frac"] * sw_for_size)
                 cv2.fillConvexPoly(self._tmp, np.round(core).astype(np.int32), 255)
                 np.copyto(self._tmp2, self._pf, casting="unsafe")              # undilated person mask
                 box_erode(self._tmp2, self.k_erode, self._hairface, self._tmp2)  # (hairface buffer reused as scratch)
                 cv2.bitwise_and(self._tmp, self._hairface, dst=self._tmp)
+                np.equal(self._cat, self.skin_class, out=self._tmp2.view(bool))
+                self._tmp2 *= 255
+                cv2.bitwise_not(self._tmp2, dst=self._tmp2)
+                cv2.bitwise_and(self._tmp, self._tmp2, dst=self._tmp)
                 cv2.bitwise_or(mask, self._tmp, dst=mask)
 
         # head box: landmarks + person pixels + hair/face-skin pixels above the shoulders
         hairface = None
         if self.head_cfg.get("use_person_mask", True):
-            np.equal(self._cat, 1, out=self._hairface.view(bool))
-            np.equal(self._cat, 3, out=self._tmp.view(bool))
+            np.equal(self._cat, self.hair_class, out=self._hairface.view(bool))
+            np.equal(self._cat, self.face_class, out=self._tmp.view(bool))
             cv2.bitwise_or(self._hairface, self._tmp, dst=self._hairface)
             self._hairface *= 255
             hairface = self._hairface
@@ -518,4 +557,5 @@ class Tracker:
         self.timings = {"pose_ms": (t1 - t0) * 1e3, "seg_ms": seg_ms if self.worker is not None else (t2 - t1) * 1e3,
                         "mask_ms": (t3 - t2) * 1e3}
         return TrackResult(ok=True, joints=joints, visibility=vis, clothes_mask=mask, head_box=head,
-                           facing=facing, timestamp=ts, shoulder_width=sw, ref_shoulder_width=ref_px)
+                           facing=facing, timestamp=ts, shoulder_width=sw, ref_shoulder_width=ref_px,
+                           person_mask=self.last_person_mask)

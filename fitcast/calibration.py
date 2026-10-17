@@ -50,6 +50,7 @@ class CalibrationData:
     gallery_rect: list[int] | None      # x0, y0, x1, y1 camera px
     verified: bool
     verify_max_err_px: float | None     # camera px
+    simulated: bool = False             # produced by --simulate: never valid for a real camera
 
 
 def _size(s) -> tuple[int, int]:
@@ -82,7 +83,7 @@ def _rescale_data(d: CalibrationData, new_size: tuple[int, int]) -> CalibrationD
         rect = [round(x0 * sx), round(y0 * sy), round(x1 * sx), round(y1 * sy)]
     verr = None if d.verify_max_err_px is None else d.verify_max_err_px * (sx + sy) / 2
     return dataclasses.replace(d, H=H / H[2, 2], camera_size=new_size, gallery_rect=rect,
-                               verify_max_err_px=verr)
+                               verify_max_err_px=verr, simulated=d.simulated)
 
 
 def _data_from_dict(raw) -> CalibrationData:
@@ -107,6 +108,7 @@ def _data_from_dict(raw) -> CalibrationData:
         gallery_rect=None if rect is None else [int(v) for v in rect],
         verified=bool(raw.get("verified", False)),
         verify_max_err_px=None if verr is None else float(verr),
+        simulated=bool(raw.get("simulated", False)),
     )
 
 
@@ -144,9 +146,10 @@ class Calibration:
             raise RuntimeError(f"no calibration loaded; {_FIX}")
         return self.data
 
-    def load(self, path: str | None = None) -> bool:
+    def load(self, path: str | None = None, allow_simulated: bool = False) -> bool:
         """Load calibration.yaml (default cfg['file']). Returns False, with a fix-it log line,
-        when the file is missing or invalid. Rescales H when it was made at another camera size."""
+        when the file is missing or invalid. Rescales H when it was made at another camera size.
+        A file written by `calibrate.py --simulate` is refused unless `allow_simulated` (video-file runs)."""
         p = Path(path or self.cfg["file"])
         if not p.is_file():
             logger.error("Calibration file %s not found: projector shows an uncalibrated "
@@ -157,6 +160,11 @@ class Calibration:
         except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError,
                 np.linalg.LinAlgError) as e:
             logger.error("Calibration file %s is invalid (%s). Fix: %s.", p, e, _FIX)
+            return False
+        if d.simulated and not allow_simulated:
+            logger.error("Calibration file %s is a SIMULATED calibration (fake homography). Refusing to use it "
+                         "with a real camera: the garment and the head blackout would land in the wrong place. "
+                         "Fix: %s.", p, _FIX)
             return False
         if d.projector_size != self.projector_size:
             logger.error("Calibration file %s was made for projector %s but config says %s. "
@@ -185,6 +193,7 @@ class Calibration:
             "gallery_rect": None if d.gallery_rect is None else [int(v) for v in d.gallery_rect],
             "verified": bool(d.verified),
             "verify_max_err_px": None if d.verify_max_err_px is None else float(d.verify_max_err_px),
+            "simulated": bool(d.simulated),
         }
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("# FitCast calibration: H maps camera px -> projector px. "

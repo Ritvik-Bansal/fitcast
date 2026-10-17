@@ -44,9 +44,25 @@ Each milestone: what was run, what was observed.
 - White clip with the default 175 cm height: "Size S, Shoulder 35 cm, Chest 92 cm, Torso 56 cm, Inseam --", stable through the clip. Ankles are not visible on either clip so the shoulder->hip fallback scale is used; real validation needs the full-body clip.
 
 ## M8 Demo mode (2026-10-17)
-- `--demo`: fullscreen projector, auto-cycle after `demo.idle_s` without a gesture every `demo.auto_cycle_s`, tracking loss fades the last good frame to black over `compositor.fade_ms` and fades back in (unit test `test_fade_on_tracking_loss`). Auto-cycle verified headlessly with short timers (see below).
+- `--demo`: fullscreen projector, auto-cycle after `demo.idle_s` without a gesture every `demo.auto_cycle_s`, tracking loss fades the last good frame to black over `compositor.fade_ms` and fades back in (unit test `test_fade_on_tracking_loss`). Auto-cycle verified headlessly on pink_turn with idle_s=2, auto_cycle_s=1: outfit index advanced at t=1.99, 3.02, 4.02 ... 9.08 s (8 changes in 9.9 s).
 
 ## Performance (2026-10-17, this MacBook Pro)
 - Live-equivalent step (threaded capture, no recording, overlay off), white clip, 225 frames: mean 25.5 ms, p50 25.1, p95 33.6 -> 39 fps capacity. Breakdown: pose 6.5 ms, segmenter 19 ms every 2nd frame in a worker thread (hidden), mask post 3 ms, render+compose+warp 7.5 ms.
 - Offline review run (sync 4K decode + INTER_AREA resize 8 ms + mp4 encode): 33 ms/frame -> 30 fps.
 - cProfile before optimisation: ellipse `cv2.dilate` x3 = 8.4 ms, boolean-index tint 5 ms, float compose 4 ms; replaced by box-filter morphology, cv2.copyTo tint, cv2.multiply.
+
+## M6 Live hardware, partial (2026-10-17)
+- Camera permission became available during the session. `main.py --list-cameras`: "MacBook Pro Camera", index 0 opens (AVFoundation). iPhone Continuity Camera not present (phone not nearby).
+- `main.py --source 0 --no-projector --max-seconds 8`: built-in camera delivers 1280x720 @ 30 fps natively; 226 frames in 8.2 s = 27.6 fps achieved with the debug window on (loop 35 ms: pose 11 ms because the full detector re-runs every frame when nobody is in view). No person in view (camera faced the ceiling), projector output stayed black, no crash.
+- Projector + person-on-mark + calibration still NOT exercised: needs the Epson on HDMI as an extended display and someone in frame.
+- rtmlib backend end to end: `--backend rtmlib` on white_turn, 150 frames: pose 15.8 ms, loop 42 ms (23.7 fps capacity, offline incl. decode); COCO-17 -> MediaPipe-33 mapping renders the cyan tee + head box correctly (out/white_rtmlib.mp4).
+
+## Soak (2026-10-17)
+- `main.py --source assets/test/white_turn.mp4 --no-window --loop --max-seconds 120 --outfit 6`: 3830 frames in 120.0 s = 31.9 fps, ~6.5 loops of the clip (MediaPipe timestamps stay monotonic across loops), no crash, no error log lines. Loop 31.3 ms incl. sync 4K decode; pose 6.4 ms, seg 9.2 ms every 2nd frame (worker thread), render+compose+warp 8.5 ms.
+
+## Review round 1 (2026-10-17)
+- Reviewer (fresh-eyes agent) ran pytest, simulated calibration, both clips, and its own head-safety probe over every frame of both clips: 0 head-box violations on 896 frames, 0 lit face/hair pixels, zero light in a 20 px band above/beside the box, >=109 px margin above the topmost face landmark (cap covered). Verdict PASS with 5 MAJORs.
+- Fixed all 5 MAJORs: (1) facing reference poisoned by hidden hips -> dual references + jump rule, tests `test_hidden_hips_do_not_poison_the_facing_reference`, `test_side_first_session_recovers...`; (2) `d` key collided with 'next' -> key map fixed + test; (3) SegWorker crash was silent -> logged with traceback, tracker falls back to synchronous segmentation, test; (4) simulated calibration.yaml at the repo root was being loaded -> separate `calibration_sim.yaml`, `simulated: true` marker, refused for cameras (verified live: "Refusing to use it with a real camera"), test; (5) stale camera frame held the last garment on the projector -> blank after 500 ms, exit after 15 s.
+- Fixed MINORs: side-state texture by shoulder order, torso fill minus skin class, gallery cleared against the person mask, head box grown by the prediction shift (test), demo idle timer resets on keyboard changes, predict horizon = measured latency, per-frame allocations (accumulateWeighted, threshold into buffers, double-buffered mask/RGB, precomputed kernel, bounded stats), hard-coded tunables moved to config (`taper`, `bottom_knee_frac`, `neck_raise_frac`, `search_window_frac`, `side_width_floor_frac`, class ids, `ref_warmup_frames`, `ref_jump_frac`), CLAUDE.md contract updated (person_mask, now=, size_table=, allow_simulated).
+- Not done from the review: Gray-code Level 2 (stretch), inseam is still hip->knee->ankle (labelled as an estimate), mask lag vs. predicted joints is documented not compensated, `_DEFAULTS` dicts in sizing/calibration/gestures remain (config has every key now).
+- After fixes: 62 tests pass; white 586 frames 30.8 fps, pink 310 frames 30.3 fps (offline incl. decode); live camera 8 s 29.5 fps; rtmlib 25 fps.

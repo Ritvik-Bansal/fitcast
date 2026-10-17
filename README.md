@@ -54,7 +54,8 @@ onnxruntime 1.31.0 (CoreML EP present), rtmlib 0.0.16, Python 3.11.15.
 
 ```bash
 .venv/bin/python scripts/calibrate.py --source 0            # live
-.venv/bin/python scripts/calibrate.py --simulate            # no hardware: synthetic rig, must print VERIFY PASS
+.venv/bin/python scripts/calibrate.py --simulate            # no hardware: synthetic rig -> calibration_sim.yaml, must print VERIFY PASS
+# calibration_sim.yaml is marked simulated and is REFUSED for live cameras; pass --calibration calibration_sim.yaml for clip runs only
 ```
 
 Live walkthrough (someone holds a large white board at the floor mark, or the person stands there):
@@ -106,9 +107,10 @@ An outfit is a folder under `assets/garments/<id>/` with `meta.yaml` and RGBA PN
 .venv/bin/python main.py --source 0 --demo --height 178
 ```
 
-Keys (debug window focused): `←/→` or `a/d` outfit, `c` re-capture the frontal reference (stand
-facing the mirror), `m` cycle mask mode (clothes / skeleton / intersect), `d` toggle overlay,
-`f` toggle projector fullscreen, `g` toggle gallery panel, `r` reload calibration, `q` quit.
+Keys (debug window focused): `←/→` or `n/p` outfit, `c` re-capture the frontal reference and
+sizing (stand facing the mirror), `m` cycle mask mode (clothes / skeleton / intersect), `d` toggle
+overlay, `f` toggle projector fullscreen, `g` toggle gallery panel, `r` reload `calibration.yaml`
+(projector recalibration itself is `scripts/calibrate.py`), `q` quit.
 
 Gestures: swipe an arm sideways at chest height (more than 1.2 shoulder widths within 0.4 s) to
 change outfit; raise both hands above the head for 1 s to toggle the gallery. Gestures are ignored
@@ -142,6 +144,8 @@ loss fades to black and back in.
 | Washed-out colors | dim the lights over the beam, raise `compositor.brightness` up to 1.0 and `garments.saturation_boost`, regenerate garments; avoid pastel/black garments |
 | Light on the face | should be impossible: `compositor.compose` blacks out `head_box` last. If the box looks small, raise `tracker.head.top_margin_frac` / `side_margin_frac` |
 | `not authorized to capture video` | grant Camera permission to the terminal app |
+| Projector goes black mid-demo, log says "no new camera frame" | the camera stalled (Continuity Camera sleep, cable); the blackout is deliberate. Wake the phone / replug; the app exits after `capture.stall_exit_s` |
+| `SIMULATED calibration ... Refusing` | you ran `calibrate.py --simulate` and pointed `--calibration` at it; run the live calibration instead |
 | MediaPipe timestamp error | frames must have increasing timestamps; `Tracker` guarantees this; if you wrote a new source, use `time.perf_counter()` |
 
 ## 8. Measured performance (this MacBook Pro, Apple Silicon, 1280x720)

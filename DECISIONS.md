@@ -23,3 +23,11 @@
 - Mask `intersect` mode also unions (pose person-mask ∩ torso polygon): on white-on-gray side views the selfie segmenter drops chunks of the shirt side; the torso is always fabric so this is a safe fill (config `mask.torso_fill`).
 - Fallback reference area is the previous frame's area (not an EMA) and 0 means 'no mask yet', otherwise the async segmenter's first result looked like a 400% jump and the skeleton fallback stuck forever.
 - Segmentation runs in a worker thread (`seg_async`): one-frame mask lag, ~9 ms/frame hidden; `SegWorker` must not name a field `_stop` (shadows Thread._stop).
+- Facing keeps two references (normalised by torso length when hips are visible, raw px otherwise) and adopts a width > 1.3x the reference at once; a single scalar reference was poisoned by a stretch of hidden hips and locked 'side' (review finding).
+- `calibrate.py --simulate` writes `calibration_sim.yaml` with `simulated: true`; `Calibration.load` refuses simulated files unless the source is a video file (a fake H would put light on the face on the real rig).
+- Main loop blanks the projector when no new frame arrives for `capture.stale_ms` and exits after `stall_exit_s`: never hold a stale garment frame on a moving person.
+- In `side` state the renderer picks front/back texture by shoulder order (3/4-back poses showed the front graphic on the back).
+- Torso fill subtracts the segmenter's body-skin class so bare arms across the torso and the neck strip are not lit.
+- Gallery panel pixels are cleared against the dilated person mask (not just clothes) so a swiping hand entering the panel is not lit.
+- Prediction horizon follows the measured capture->display latency (`smoothing.predict_auto`), clamped to `predict_max_ms`.
+- Keys: `d` is debug-overlay only (was also 'next'); outfit keys are arrows + n/p.

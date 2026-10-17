@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import math
 
+import cv2
 import numpy as np
 
-from .types import TrackResult
+from .types import FACE_IDX, TrackResult
 
 
 class OneEuroArray:
@@ -57,6 +58,7 @@ class Smoother:
         self.max_predict_px = float(cfg["max_predict_px"])
         self.mask_alpha = float(mask_alpha)
         self._mask_acc: np.ndarray | None = None
+        self._mask_out: np.ndarray | None = None
         self._last_ok = False
 
     def reset(self) -> None:
@@ -75,23 +77,34 @@ class Smoother:
             self._last_ok = False
             return track
         self._last_ok = True
+        raw_face = track.joints[list(FACE_IDX), :2].copy()
         xy = self.filt(track.joints[:, :2], track.timestamp)
         if self.predict_s > 0 and self.filt.velocity is not None:
             step = self.filt.velocity * self.predict_s
             np.clip(step, -self.max_predict_px, self.max_predict_px, out=step)
             xy = xy + step
         track.joints[:, :2] = xy
+        # the head box was built from raw landmarks: grow it by the smoothing/prediction shift of the face
+        d = xy[list(FACE_IDX)] - raw_face
+        dx0, dy0 = float(min(d[:, 0].min(), 0.0)), float(min(d[:, 1].min(), 0.0))
+        dx1, dy1 = float(max(d[:, 0].max(), 0.0)), float(max(d[:, 1].max(), 0.0))
+        h, w = track.clothes_mask.shape[:2]
+        x0, y0, x1, y1 = track.head_box
+        track.head_box = (max(0, int(np.floor(x0 + dx0))), max(0, int(np.floor(y0 + dy0))),
+                          min(w, int(np.ceil(x1 + dx1))), min(h, int(np.ceil(y1 + dy1))))
         if self.mask_alpha < 1.0:
             m = track.clothes_mask
             if self._mask_acc is None or self._mask_acc.shape != m.shape:
                 self._mask_acc = m.astype(np.float32)
+                self._mask_out = np.empty_like(m)
             else:
-                cv2_accumulate(self._mask_acc, m, self.mask_alpha)
-            track.clothes_mask = (self._mask_acc > 127).astype(np.uint8) * 255
+                cv2.accumulateWeighted(m, self._mask_acc, self.mask_alpha)
+            cv2.threshold(self._mask_acc, 127, 255, cv2.THRESH_BINARY, dst=self._mask_acc_bin())
+            np.copyto(self._mask_out, self._mask_acc_bin(), casting="unsafe")
+            track.clothes_mask = self._mask_out
         return track
 
-
-def cv2_accumulate(acc: np.ndarray, m: np.ndarray, alpha: float) -> None:
-    """acc = (1-alpha)*acc + alpha*m, in place, without allocating a float copy of `m`."""
-    acc *= (1.0 - alpha)
-    acc += m * alpha  # m is uint8 0/255; numpy promotes the product to float
+    def _mask_acc_bin(self) -> np.ndarray:
+        if getattr(self, "_bin", None) is None or self._bin.shape != self._mask_acc.shape:
+            self._bin = np.empty_like(self._mask_acc)
+        return self._bin

@@ -38,6 +38,7 @@ class TrackResult:
     timestamp: float                  # time.perf_counter() of the capture
     shoulder_width: float             # px, current
     ref_shoulder_width: float         # px, reference frontal width (running max)
+    person_mask: np.ndarray | None    # (H, W) uint8 dilated whole-person mask (None for backends without one)
 
 @dataclass
 class Outfit:
@@ -53,10 +54,11 @@ class GalleryState:
     visible: bool; size_text: str; measure_text: str
 
 renderer.draw(track: TrackResult, outfit: Outfit) -> np.ndarray      # (H, W, 4) RGBA camera space
-compositor.compose(rgba, track, gallery_state) -> np.ndarray         # (H, W, 3) BGR camera space
+compositor.compose(rgba, track, gallery_state, now=None) -> np.ndarray   # (H, W, 3) BGR camera space; `now` = perf_counter (tests)
 calibration.to_projector(img_cam) -> np.ndarray                      # (1080, 1920, 3) BGR
+calibration.load(path=None, allow_simulated=False) -> bool           # simulated files only for video-file sources
 gestures.update(track) -> list[str]                                  # events: "next" | "prev" | "toggle_gallery"
-sizing.update(track) -> None ; sizing.recommendation() -> tuple[str, str]  # (size_text, measure_text)
+sizing.update(track) -> None ; sizing.recommendation(size_table=None) -> tuple[str, str]  # (size_text, measure_text)
 ```
 
 Landmark indices follow MediaPipe Pose 33-point order. Other backends map to

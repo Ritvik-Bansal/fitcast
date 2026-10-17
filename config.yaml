@@ -8,6 +8,8 @@ capture:
   resize_interpolation: area   # area | linear  (area = better mask edges, 6 ms on 4K; linear = 0.4 ms)
   video_loop: true
   video_realtime: true      # play files at their native fps
+  stale_ms: 500             # no new frame for this long -> projector shows black (safety)
+  stall_exit_s: 15          # no new frame for this long -> exit with an error
 
 tracker:
   backend: mediapipe        # mediapipe | rtmlib
@@ -30,6 +32,9 @@ tracker:
   mask:
     mode: intersect         # clothes | skeleton | intersect
     clothes_class: 4        # selfie_multiclass: 0 bg, 1 hair, 2 body-skin, 3 face-skin, 4 clothes, 5 others
+    hair_class: 1
+    body_skin_class: 2
+    face_class: 3
     close_kernel_px: 5
     erode_px: 4
     temporal_alpha: 0.6     # EMA weight of the newest mask (1.0 = no smoothing)
@@ -37,9 +42,11 @@ tracker:
     fallback_hold_frames: 15
     person_gate_threshold: 0.5 # pose person-mask confidence that gates the clothes mask
     person_gate_dilate_px: 8
-    torso_fill: true        # intersect mode: union (person mask ∩ torso polygon) to fill segmenter holes on the torso
+    torso_fill: true        # intersect mode: union (person mask ∩ torso polygon, minus skin) to fill segmenter holes on the torso
+    torso_fill_hem_frac: 0.5   # fill polygon hem drop as a fraction of skeleton.hem_drop_frac
     skeleton:               # widths as fractions of shoulder width
       torso_margin_frac: 0.15
+      neck_raise_frac: 0.05
       hem_drop_frac: 0.15
       upper_arm_width_frac: 0.32
       forearm_width_frac: 0.26
@@ -53,18 +60,24 @@ tracker:
     bottom_gap_frac: 0.08   # box bottom sits this far above the shoulder line
     min_margin_frac: 0.25   # spec minimum: never less than this around the face
     use_person_mask: true   # also union the pose person-mask pixels above the shoulders
+    search_window_frac: 0.75   # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
+    side_width_floor_frac: 0.7 # in side view size the box/skeleton from at least this fraction of the reference shoulder width
   facing:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
     hold_frames: 6
     ref_update_rate: 0.02   # slow running-max update of the frontal reference
-    ref_decay_rate: 0.002   # slow decay so a bad early max does not stick forever
+    ref_decay_rate: 0.0005  # slow decay so a bad early max does not stick forever
+    ref_warmup_frames: 30   # fast running max for this many frames per reference
+    ref_jump_frac: 1.3      # a width this much above the reference is adopted at once (session started side-on)
     face_vis_back_threshold: 0.3   # nose/eye visibility below this is a weak "back" hint
 
 smoothing:
   min_cutoff: 1.0
   beta: 0.05
   d_cutoff: 1.0
-  predict_ms: 50
+  predict_ms: 50            # initial prediction horizon
+  predict_auto: true        # replace it with the measured capture->display latency (EMA, clamped)
+  predict_max_ms: 120
   max_predict_px: 40
 
 renderer:
@@ -78,7 +91,19 @@ renderer:
   shin_width_frac: 0.34
   waist_band_height_frac: 0.14
   side_min_width_frac: 0.85 # side view: torso quad is at least this wide (fraction of ref shoulder width); the mask clips it
+  bottom_knee_frac: 0.55    # where the bottoms texture splits thigh / shin (fraction of its height)
+  waist_min_half_width_frac: 0.45
   feather_px: 4
+  taper:                    # end-width multipliers and overlaps of the limb quads
+    upper_arm: 0.85
+    forearm: 0.8
+    forearm_overlap: 0.5
+    thigh: 0.85
+    thigh_overlap: 0.3
+    thigh_src_start: 0.8    # thigh texture starts at this fraction of the waist band height
+    shin: 0.9
+    shin_overlap: 0.3
+    waist_band_extent: 0.6
 
 compositor:
   brightness: 1.0
@@ -112,6 +137,7 @@ gestures:
 
 calibration:
   file: calibration.yaml
+  sim_file: calibration_sim.yaml   # --simulate output; marked simulated and refused for live cameras
   projector_width: 1920
   projector_height: 1080
   marker_grid: [3, 3]       # cols, rows of projected markers (4..9)
@@ -161,6 +187,7 @@ demo:
 
 logging:
   level: INFO
+  stats_window: 3000        # frames kept for the exit report (bounded memory)
 
 garments:
   dir: assets/garments

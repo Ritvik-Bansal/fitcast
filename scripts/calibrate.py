@@ -64,9 +64,10 @@ def simulate(config: dict, out: str) -> int:
     dev = float(np.linalg.norm(cal.project_points(corners) - truth, axis=1).max())
     print(f"recovered H vs H_true: max {dev:.3f} projector px over the camera frame corners")
     cal.data.gallery_rect = [int(v) for v in config["compositor"]["gallery"]["rect"]]
+    cal.data.simulated = True
     cal.save(out)
     back = Calibration(cfg, cam)
-    if not back.load(out) or not np.allclose(back.H, cal.H):
+    if not back.load(out, allow_simulated=True) or not np.allclose(back.H, cal.H):
         print(f"FAIL: {out} did not load back with the same H")
         return 1
     print(f"saved {out}: gallery_rect {back.data.gallery_rect}, verified={back.data.verified}, "
@@ -333,8 +334,14 @@ def live_session(rig: LiveRig, config: dict, out: str) -> None:
 def live(config: dict, args: argparse.Namespace, out: str) -> int:
     """Interactive calibration with a real camera and projector; return an exit code."""
     disp = config["display"]
-    px = args.projector_x if args.projector_x is not None else (disp.get("projector_x") or 0)
-    py = args.projector_y if args.projector_y is not None else (disp.get("projector_y") or 0)
+    px, py = args.projector_x, args.projector_y
+    if px is None or py is None:
+        from fitcast.display import detect_displays
+        second = next((s for s in detect_displays() if not s["main"]), None)
+        if px is None:
+            px = disp.get("projector_x") if disp.get("projector_x") is not None else (second["x"] if second else 0)
+        if py is None:
+            py = disp.get("projector_y") if disp.get("projector_y") is not None else (second["y"] if second else 0)
     source = args.source if args.source is not None else config["capture"]["source"]
     rig = LiveRig(config, source, (px, py))
     try:
@@ -361,12 +368,14 @@ def main() -> int:
     ap.add_argument("--projector-y", type=int, default=None,
                     help="projector display origin y (default: display.projector_y, else 0)")
     ap.add_argument("--simulate", action="store_true", help="headless run against a fake rig")
-    ap.add_argument("--out", default=None, help="output file (default: calibration.file)")
+    ap.add_argument("--out", default=None,
+                    help="output file (default: calibration.file; --simulate defaults to calibration.sim_file "
+                         "so a fake homography never shadows a real one)")
     args = ap.parse_args()
     sys.stdout.reconfigure(line_buffering=True)    # keep prints and log lines in order
     config = yaml.safe_load(Path(args.config).read_text())
     logging.basicConfig(level=config["logging"]["level"], format="%(levelname)s %(name)s: %(message)s")
-    out = args.out or config["calibration"]["file"]
+    out = args.out or (config["calibration"]["sim_file"] if args.simulate else config["calibration"]["file"])
     return simulate(config, out) if args.simulate else live(config, args, out)
 
 

@@ -23,6 +23,7 @@ class TrackResult:
     timestamp: float                        # perf_counter at capture
     shoulder_width: float = 0.0
     ref_shoulder_width: float = 0.0
+    person_mask: np.ndarray | None = None   # (H, W) uint8 0/255 dilated whole-person mask when the backend has one
 
     @staticmethod
     def empty(h: int, w: int, timestamp: float = 0.0) -> "TrackResult":

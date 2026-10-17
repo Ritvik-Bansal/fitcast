@@ -155,5 +155,6 @@ class Compositor:
             y += int(20 * fs / 0.55)
         # never light the person: clear panel pixels on/near the person mask
         if track.ok:
-            near = cv2.dilate(track.clothes_mask[y0:y1, x0:x1], self.k_gap)
+            body = track.person_mask if track.person_mask is not None else track.clothes_mask
+            near = cv2.dilate(body[y0:y1, x0:x1], self.k_gap)
             panel[near > 0] = 0
