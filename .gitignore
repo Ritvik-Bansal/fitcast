@@ -1,0 +1,12 @@
+.env
+*.pt
+*.onnx
+weights/
+.venv/
+__pycache__/
+node_modules/
+dist/
+.DS_Store
+xcuserdata/
+DerivedData/
+*.xcuserstate
