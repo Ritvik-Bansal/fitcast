@@ -72,3 +72,10 @@ Each milestone: what was run, what was observed.
 - Demo auto-cycle re-verified after the idle-timer fix: changes at 1.99, 3.0, 4.01 ... 9.08 s with idle 2 s / cycle 1 s.
 - `mp.Image` verified to copy its input (double-buffer handoff is race-free).
 - 62 tests pass.
+
+## Live hardware session (2026-10-17 evening, Epson CO-FH02 on HDMI + MacBook camera)
+- OpenCV fullscreen landed on the laptop (macOS Cocoa fullscreen = main screen only). Fixed with a borderless NSWindow on the EPSON NSScreen (AppKit), later replaced by a CoreGraphics layer window with a background commit thread (projector commit no longer blocks the loop).
+- Camera indices shuffle when the iPhone comes and goes; added `name:MacBook`, `auto` and automatic reopen after 3 s without frames (observed one stall ~8 s after opening, recovered).
+- Marker calibration in a lit room: fixed threshold failed; channel-max difference + adaptive threshold + disc-shape filter + one-marker-at-a-time median captures -> 9/9 markers, reprojection 2.31 px RMS, verify max 1.60 px.
+- Depth refinement (`calibrate.py --refine`): probe discs projected on the tracked chest/belly through H, offset measured by the camera and folded into H. Pass 1 error (-7, +98) px (the garment sat ~10 cm low, as the team saw), pass 2 6.4 px, pass 3 4.5 px.
+- Tracker now runs on the projector-footprint ROI only (bystanders beside the rig had hijacked tracking and one refine run; that run was undone exactly).
