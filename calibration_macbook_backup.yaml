@@ -1,0 +1,29 @@
+# FitCast calibration: H maps camera px -> projector px. Written by scripts/calibrate.py.
+H:
+- - 3.010289698160574
+  - 0.021613195168817056
+  - -657.7163625737525
+- - -0.03615711399350045
+  - 2.7428823345722466
+  - -968.6320108814533
+- - 0.00018638316929291048
+  - -0.00010043318085627152
+  - 1.0
+camera_size:
+- 1280
+- 720
+projector_size:
+- 1920
+- 1080
+reproj_error_px: 2.3124927735645993
+timestamp: 2026-10-17T18:27:24-07:00 refined
+gallery_rect:
+- 301
+- 213
+- 461
+- 581
+verified: true
+verify_max_err_px: 1.6006801639204549
+simulated: false
+depth_ref_torso_px: 116.94634246826172
+depth_slope: null
