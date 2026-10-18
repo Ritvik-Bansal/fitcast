@@ -15,7 +15,8 @@ targets:
     platform: iOS
     deploymentTarget: "18.0"      # DetectHumanBodyPoseRequest (Swift Vision API) needs iOS 18
     sources:
-      - FitCastSensor
+      - path: FitCastSensor
+        excludes: ["README.md"]
     settings:
       base:
         DEVELOPMENT_TEAM: 7JCAPWSS7Z
