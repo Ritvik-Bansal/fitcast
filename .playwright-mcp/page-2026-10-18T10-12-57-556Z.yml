@@ -1,0 +1,35 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - link "F FitCast" [ref=e4] [cursor=pointer]:
+      - /url: /
+      - generic [ref=e5]: F
+      - heading "FitCast" [level=1] [ref=e6]
+    - navigation [ref=e7]:
+      - link "Add garment" [ref=e8] [cursor=pointer]:
+        - /url: /
+      - link "Cart" [ref=e9] [cursor=pointer]:
+        - /url: /cart
+  - generic [ref=e10]:
+    - generic [ref=e11]:
+      - paragraph [ref=e12]: Add to the booth
+      - heading "Paste a link, wear it in seconds." [level=2] [ref=e13]
+      - paragraph [ref=e14]: Any product page or image link. The garment is cut out, fitted and added to the live wardrobe on the wall.
+      - generic [ref=e15]:
+        - textbox "https://www.stussy.com/products/…" [active] [ref=e17]
+        - generic [ref=e18]:
+          - combobox [ref=e20]:
+            - 'option "Top or bottom: detect" [selected]'
+            - option "Top"
+            - option "Bottom"
+          - textbox "Name on the wall (optional)" [ref=e22]
+        - button "Add to booth" [ref=e23] [cursor=pointer]
+      - generic [ref=e24]:
+        - generic [ref=e25]: Fetch
+        - generic [ref=e26]: Cut out
+        - generic [ref=e27]: Fit
+        - generic [ref=e28]: On the wall
+      - generic [ref=e30]:
+        - generic [ref=e31]: Works best with flat product photos on a plain background, front view.
+        - generic [ref=e32]: "Blocked shop? Amazon, Uniqlo, Levi's and Zara refuse downloads: save the product image and paste a direct image link."
+        - generic [ref=e33]: "In the booth: say \"Magic mirror\", wait for the chime, then ask. Hold both hands up to add what you wear to the cart."
+    - heading "Wardrobe on the wall" [level=3] [ref=e36]

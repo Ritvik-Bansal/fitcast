@@ -4,52 +4,88 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FitCast Cart</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2716%27 fill=%27%23f5c84b%27/%3E%3Ctext x=%2732%27 y=%2744%27 font-size=%2736%27 font-family=%27Inter,Arial%27 font-weight=%27800%27 text-anchor=%27middle%27 fill=%27%231a1300%27%3EF%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#0e0e11; --card:#17181d; --ink:#f2f2f5; --muted:#9a9ba6; --accent:#ffd34d; }
-  * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; background:radial-gradient(1200px 600px at 50% -10%, #23242c, var(--bg)); color:var(--ink); font:16px/1.5 -apple-system, "Inter", system-ui, sans-serif; padding:32px 16px; }
-  .wrap { width:min(820px, 100%); margin:0 auto; }
-  header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:20px; }
-  h1 { margin:0; font-size:32px; letter-spacing:-.02em; }
-  .count { color:var(--muted); }
-  ol { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
-  li { background:var(--card); border:1px solid #2a2b33; border-radius:16px; padding:18px 20px; display:grid; grid-template-columns:auto 1fr auto; gap:16px; align-items:center; }
-  .tag { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#1a1300; background:var(--accent); border-radius:999px; padding:4px 10px; }
-  .tag.bottom { background:#8fd3ff; }
-  .name { font-weight:600; font-size:18px; }
-  .url { color:var(--muted); font-size:13px; word-break:break-all; }
-  a.buy { color:var(--accent); font-weight:700; text-decoration:none; white-space:nowrap; }
-  .time { color:var(--muted); font-size:12px; }
-  .empty { color:var(--muted); text-align:center; padding:60px 0; }
-  nav { margin-top:24px; display:flex; gap:20px; }
-  nav a, nav button { color:var(--accent); background:none; border:none; font:inherit; cursor:pointer; padding:0; text-decoration:none; }
+  :root { --bg: #0b0b0e; --panel: rgba(255,255,255,.04); --line: rgba(255,255,255,.08); --ink: #f4f3ef; --muted: #8e8e9a; --accent: #f5c84b; --accent-2: #7ec8ff; --radius: 22px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 "Inter", system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+  body::before { content: ""; position: fixed; inset: -20% -10% auto -10%; height: 70vh; pointer-events: none;
+    background: radial-gradient(60% 60% at 70% 10%, rgba(245,200,75,.16), transparent 60%), radial-gradient(50% 50% at 20% 20%, rgba(126,200,255,.12), transparent 60%); }
+  .shell { position: relative; max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 6px 0 34px; }
+  .brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; }
+  .brand .mark { width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, var(--accent), #ff8a5b); display: grid; place-items: center; color: #1a1300; font-weight: 800; }
+  .brand h1 { margin: 0; font: 600 20px/1 "Inter", sans-serif; letter-spacing: -.02em; }
+  nav { display: flex; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
+  nav a { color: var(--muted); text-decoration: none; padding: 8px 16px; border-radius: 999px; font-weight: 500; transition: .2s; }
+  nav a.active, nav a:hover { color: var(--ink); background: rgba(255,255,255,.08); }
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 22px; flex-wrap: wrap; }
+  .eyebrow { color: var(--accent); font-weight: 600; font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 8px; }
+  h2.display { font: italic 400 46px/1.05 "Instrument Serif", serif; margin: 0; }
+  .meta { color: var(--muted); }
+  .actions { display: flex; gap: 10px; }
+  .btn { font: 600 14px "Inter", sans-serif; border-radius: 12px; padding: 11px 16px; cursor: pointer; border: 1px solid var(--line); background: var(--panel); color: var(--ink); transition: .2s; }
+  .btn:hover { background: rgba(255,255,255,.08); }
+  .btn.danger:hover { border-color: rgba(255,122,122,.6); color: #ff9a9a; }
+  .list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .item { display: grid; grid-template-columns: 96px 1fr; gap: 16px; background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.025)); border: 1px solid var(--line); border-radius: 18px; padding: 14px; transition: transform .2s, border .2s; animation: in .35s ease both; }
+  .item:hover { transform: translateY(-2px); border-color: rgba(245,200,75,.45); }
+  @keyframes in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .pic { width: 96px; height: 112px; border-radius: 12px; background: radial-gradient(80% 80% at 50% 30%, #23232c, #15151b); display: grid; place-items: center; overflow: hidden; }
+  .pic img { width: 100%; height: 100%; object-fit: contain; padding: 6px; }
+  .body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .tag { align-self: flex-start; font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #1a1300; background: var(--accent); border-radius: 999px; padding: 3px 9px; }
+  .tag.bottom { background: var(--accent-2); }
+  .name { font-weight: 600; font-size: 16px; line-height: 1.25; }
+  .url { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .time { color: var(--muted); font-size: 12px; }
+  a.buy { color: var(--accent); font-weight: 700; text-decoration: none; font-size: 14px; }
+  a.buy:hover { text-decoration: underline; }
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 80px 20px; border: 1px dashed var(--line); border-radius: var(--radius); }
+  .empty b { color: var(--ink); display: block; font: italic 400 26px "Instrument Serif", serif; margin-bottom: 8px; }
+  @media (max-width: 700px) { h2.display { font-size: 36px; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header><h1>Cart</h1><span class="count" id="count"></span></header>
-  <ol id="list"></ol>
-  <div class="empty" id="empty" hidden>Nothing yet. Hold both hands up in the booth for three seconds to add what you are wearing.</div>
-  <nav><a href="/">← Add a garment</a><button id="clear">Clear cart</button></nav>
+<div class="shell">
+  <header>
+    <a class="brand" href="/"><span class="mark">F</span><h1>FitCast</h1></a>
+    <nav><a href="/">Add garment</a><a class="active" href="/cart">Cart</a></nav>
+  </header>
+  <div class="top">
+    <div><p class="eyebrow">Your picks</p><h2 class="display">Cart</h2></div>
+    <div class="actions"><span class="meta" id="count"></span><button class="btn danger" id="clear">Clear</button></div>
+  </div>
+  <div class="list" id="list"></div>
 </div>
 <script>
-const list = document.getElementById('list'), empty = document.getElementById('empty'), count = document.getElementById('count');
-let last = '';
+const list = document.getElementById('list'), count = document.getElementById('count');
+let last = '', outfits = [];
+async function loadOutfits() { try { outfits = await (await fetch('/api/outfits', {cache: 'no-store'})).json(); } catch (e) {} }
+function picFor(e) {
+  const o = outfits.find(o => (e.part === 'top' ? o.top : o.bottom) === e.name);
+  return o ? `<img src="/part/${o.folder}/${e.part}" alt="">` : '<span style="color:#555;font-size:28px">👕</span>';
+}
 async function refresh() {
   try {
     const r = await fetch('/api/cart', {cache: 'no-store'}); const d = await r.json(); const key = JSON.stringify(d);
     if (key === last) return; last = key;
+    if (!outfits.length) await loadOutfits();
     list.innerHTML = '';
+    if (!d.length) { list.innerHTML = '<div class="empty"><b>Nothing here yet</b>Hold both hands over your head in the booth for three seconds to add what you are wearing.</div>'; count.textContent = ''; return; }
     d.slice().reverse().forEach((e) => {
-      const li = document.createElement('li');
-      li.innerHTML = `<span class="tag ${e.part}">${e.part}</span><div><div class="name">${e.name}</div><div class="url">${e.url}</div><div class="time">${e.time}</div></div><a class="buy" href="${e.url}" target="_blank" rel="noopener">Buy →</a>`;
-      list.appendChild(li);
+      const el = document.createElement('div'); el.className = 'item';
+      el.innerHTML = `<div class="pic">${picFor(e)}</div><div class="body"><span class="tag ${e.part}">${e.part}</span><div class="name">${e.name}</div><div class="url">${e.url}</div><div class="foot"><span class="time">${e.time}</span><a class="buy" href="${e.url}" target="_blank" rel="noopener">Buy →</a></div></div>`;
+      list.appendChild(el);
     });
-    empty.hidden = d.length > 0; count.textContent = d.length ? `${d.length} item${d.length > 1 ? 's' : ''}` : '';
+    count.textContent = `${d.length} item${d.length > 1 ? 's' : ''}`;
   } catch (err) { count.textContent = 'server offline'; }
 }
 document.getElementById('clear').onclick = async () => { await fetch('/api/cart/clear', {method: 'POST'}); last = ''; refresh(); };
-refresh(); setInterval(refresh, 2000);
+loadOutfits().then(refresh); setInterval(refresh, 2000);
 </script>
 </body>
 </html>

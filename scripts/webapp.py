@@ -40,6 +40,16 @@ def _run_fetch(url: str, part: str, name: str) -> dict:
     return {"ok": ok, "code": r.returncode, "log": tail}
 
 
+def _excluded(folder: str) -> bool:
+    """Folders the demo hides (config garments.exclude_prefixes)."""
+    try:
+        import yaml
+        cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
+        return folder.startswith(tuple(cfg.get("garments", {}).get("exclude_prefixes") or []))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class H(BaseHTTPRequestHandler):
     def _send(self, body: bytes, ctype: str = "text/html; charset=utf-8", code: int = 200) -> None:
         self.send_response(code)
@@ -58,13 +68,35 @@ class H(BaseHTTPRequestHandler):
             data = json.loads(CART.read_text()) if CART.exists() else []
             self._send(json.dumps(data).encode(), "application/json")
         elif p == "/api/outfits":
-            names = []
+            items = []
             for d in sorted((ROOT / "assets" / "garments").glob("[0-9]*/meta.yaml")):
+                if _excluded(d.parent.name):
+                    continue
+                name = ""
                 for line in d.read_text().splitlines():
                     if line.startswith("name:"):
-                        names.append(line.split(":", 1)[1].strip())
+                        name = line.split(":", 1)[1].strip().strip("'\"")
                         break
-            self._send(json.dumps(names).encode(), "application/json")
+                items.append({"folder": d.parent.name, "name": name,
+                              "top": name.split(" + ")[0], "bottom": name.split(" + ")[-1]})
+            self._send(json.dumps(items).encode(), "application/json")
+        elif p.startswith("/thumb/") or p.startswith("/part/"):
+            parts = p.strip("/").split("/")
+            folder = (ROOT / "assets" / "garments" / parts[1]).resolve()
+            if not str(folder).startswith(str((ROOT / "assets" / "garments").resolve())) or not folder.is_dir():
+                self._send(b"not found", "text/plain", 404)
+                return
+            fname = "thumb.png" if parts[0] == "thumb" else ("top_front.png" if parts[2] == "top" else "bottom_front.png")
+            f = folder / fname
+            if f.exists():
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Cache-Control", "max-age=60")
+                self.send_header("Content-Length", str(f.stat().st_size))
+                self.end_headers()
+                self.wfile.write(f.read_bytes())
+            else:
+                self._send(b"not found", "text/plain", 404)
         else:
             self._send(b"not found", "text/plain", 404)
 
