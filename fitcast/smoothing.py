@@ -89,7 +89,7 @@ class Smoother:
         # outlier gate: a landmark that jumps farther than a body can move in one frame (torso: `max_jump_sw`,
         # limbs: `max_jump_sw_limbs`, in shoulder widths) keeps its previous position for up to `max_freeze_frames`
         if self._prev_xy is not None and track.shoulder_width > 1.0:
-            lim = np.maximum(self._jump_lim * float(track.shoulder_width), self.jump_floor_px)
+            lim = np.maximum(self._jump_lim * float(max(track.shoulder_width, track.ref_shoulder_width)), self.jump_floor_px)
             jump = np.linalg.norm(track.joints[:, :2] - self._prev_xy, axis=1)
             bad = (jump > lim) & (self._frozen < self.max_freeze)
             if bad.any():

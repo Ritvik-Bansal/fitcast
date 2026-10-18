@@ -82,6 +82,8 @@ tracker:
     search_window_frac: 0.4    # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
     side_width_floor_frac: 0.7 # in side view size the box/skeleton from at least this fraction of the reference shoulder width
   max_shoulder_px: 320      # wider shoulders = someone at the lens, not in the beam: ignored
+  min_shoulder_px: 35       # narrower = a projected thumbnail or reflection, not the person: ignored
+  track_hold_frames: 6      # frames the last good track is kept when the detector blinks
   facing:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
     hold_frames: 15         # frames a new facing must persist (0.5 s): brief landmark swaps never flip the texture

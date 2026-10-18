@@ -437,6 +437,11 @@ class Tracker:
         self._clothes = np.zeros((self.H, self.W), np.uint8)
         self.hold_frames = int(mcfg.get("mask_hold_frames", 4))
         self.max_shoulder_px = float(cfg.get("max_shoulder_px", 0.3 * self.W))
+        self.min_shoulder_px = float(cfg.get("min_shoulder_px", 0.0))
+        self.hold_frames_track = int(cfg.get("track_hold_frames", 0))
+        self._held: TrackResult | None = None
+        self._held_mask: np.ndarray | None = None
+        self._hold_left = 0
         self._hold = np.zeros((self.H, self.W), np.uint8)
         self._skel = np.zeros((self.H, self.W), np.uint8)
         self._gate = np.zeros((self.H, self.W), np.uint8)
@@ -512,6 +517,10 @@ class Tracker:
             sw = float(np.hypot(*(j[L_SHOULDER, :2] - j[R_SHOULDER, :2])))
             if sw > self.max_shoulder_px:        # someone leaning into the lens can never be the person in the beam
                 continue
+            if sw < self.min_shoulder_px:        # a projected garment thumbnail "person" on the wall is tiny
+                continue
+            if v[L_HIP] < self.min_vis and v[R_HIP] < self.min_vis:   # ... and has no hips
+                continue
             score = sw
             if self._prev_center is not None:
                 score -= 0.5 * float(np.hypot(*(c - self._prev_center)))   # continuity
@@ -560,7 +569,24 @@ class Tracker:
                 self._person_full[roi[1]:roi[3], roi[0]:roi[2]] = person
                 person = self._person_full
         t1 = time.perf_counter()
-        return self._finish(frame_bgr, ts, ms, joints, vis, person, t0, t1)
+        res = self._finish(frame_bgr, ts, ms, joints, vis, person, t0, t1)
+        if self.hold_frames_track > 0:
+            # a frame without a valid person (detector blink, thumbnail picked and rejected) keeps the last good
+            # track for a few frames instead of dropping the garment
+            if res.ok:
+                self._hold_left = self.hold_frames_track
+                if self._held_mask is None or self._held_mask.shape != res.clothes_mask.shape:
+                    self._held_mask = res.clothes_mask.copy()
+                else:
+                    np.copyto(self._held_mask, res.clothes_mask)
+                self._held = res
+            elif self._held is not None and self._hold_left > 0:
+                self._hold_left -= 1
+                h = self._held
+                return TrackResult(ok=True, joints=h.joints.copy(), visibility=h.visibility, clothes_mask=self._held_mask,
+                                   head_box=h.head_box, facing=h.facing, timestamp=ts, shoulder_width=h.shoulder_width,
+                                   ref_shoulder_width=h.ref_shoulder_width, person_mask=h.person_mask, facing_ratio=h.facing_ratio)
+        return res
 
     def process_external(self, frame_bgr: np.ndarray, ts: float, joints: np.ndarray, vis: np.ndarray,
                          person_mask: np.ndarray | None) -> TrackResult:

@@ -47,7 +47,6 @@ DOWNLOAD_PAUSE_S = 1.5      # between downloads (Commons answers 429 to bursts)
 SOURCES_HEADING = "## Bottoms (scripts/fetch_garments_bottoms.py)"
 SHEET_ROW_H = 384           # contact sheet row height (px)
 
-AM_CREDIT = "Auckland War Memorial Museum Tamaki Paenga Hira"
 NM_CREDIT = "Nordiska museet"
 
 # key -> Commons file + cut-out hints (same meaning as fetch_garments.MANIFEST):
@@ -56,31 +55,46 @@ NM_CREDIT = "Nordiska museet"
 #   attribution (credit when Commons "Artist" names the maker or is empty), note (shown in SOURCES.md).
 MANIFEST: dict[str, dict] = {
     "cargo_olive_photo": dict(title="File:Cargo pants 001.jpg", back_title="File:Cargo pants 002.jpg",
+                              crop=(0.0, 0.125, 1.0, 1.0), open_frac=0.01,
                               desc="olive ripstop cargo pants with bellows pockets (front + back photo)"),
     "jeans_mid_blue": dict(title="File:Women's Pair of Blue Jeans Worn by Grace Strobel - DPLA - "
                                  "e94c33e652b48ea0513c90bc9b383e89 (page 1).jpg",
                            back_title="File:Women's Pair of Blue Jeans Worn by Grace Strobel - DPLA - "
                                       "e94c33e652b48ea0513c90bc9b383e89 (page 3).jpg",
+                           attribution="Missouri Historical Society (garment: AG Jeans)",
                            desc="mid-blue straight jeans with cuffed hems (front + back photo)"),
     "jeans_light_501": dict(title="File:Spijkerbroek, merk Levi\u2019s 501, objectnr 75213(1).JPG",
                             back_title="File:Spijkerbroek, merk Levi\u2019s 501, objectnr 75213(2).JPG",
+                            crop=(0.2, 0.335, 0.8, 1.0), back_hints=dict(crop=(0.2, 0.325, 0.8, 1.0)),
+                            attribution="Rob Geerlings / Museum Rotterdam (garment: Levi Strauss & Co)",
                             desc="light-wash Levi's 501 jeans with patched knees (front + back photo, on a mannequin)"),
-    "trackpants_black": dict(title="File:Tracksuit bottoms.jpg",
+    "trackpants_black": dict(title="File:Tracksuit bottoms.jpg", gamma=0.5,
                              desc="black tapered track pants with gold side stripes"),
-    "chinos_beige": dict(title="File:Chino pants.jpg", desc="beige straight chinos"),
-    "jeans_black_501": dict(title="File:Levi's 501 black.jpg", desc="black Levi's 501 jeans (back view used for both sides)"),
-    "jeans_dark_dallas": dict(title="File:Jeans Gul&Bl\u00e5 i modellen Dallas.jpg", attribution=NM_CREDIT,
-                              desc="dark rinse straight jeans"),
+    "chinos_beige": dict(title="File:Chino pants.jpg", white=185, bg_dist=12, desc="beige straight chinos"),
+    "jeans_dark_dallas": dict(title="File:Jeans Gul&Bl\u00e5 i modellen Dallas.jpg",
+                              attribution="Elisabeth Eriksson / " + NM_CREDIT, crop=(0.0, 0.0, 1.0, 0.95), gamma=0.7, desc="dark rinse straight jeans"),
     "jeans_worn_mended": dict(title="File:Slitna jeans f\u00f6r m\u00e4n i bomull med lagade med sick-sacks\u00f6m "
-                                    "p\u00e5 kn\u00e4na. 032s8YepsD7C.jpg", attribution=NM_CREDIT,
-                              desc="worn mid-wash men's jeans with darned knees"),
+                                    "p\u00e5 kn\u00e4na. 032s8YepsD7C.jpg",
+                              attribution=NM_CREDIT, crop=(0.0, 0.0, 0.88, 0.95), white=200, desc="worn mid-wash men's jeans with darned knees"),
     "cargo_black_work": dict(title="File:Zwarte werkbroek met witte bies, van Bulgaarse bouwvakker, objectnr 91220-3.JPG",
+                             gamma=0.5, attribution="Museum Rotterdam",
                              desc="black cotton work cargo pants with white piping"),
-    "joggers_grey": dict(title="File:Unisex-Jogginghose.jpg", desc="grey cotton joggers with cuffed ankles"),
 }
 
 # Outfit folders: (id, name, top source folder, bottom key)
-PAIRS: list[tuple[str, str, str, str]] = []
+PAIRS: list[tuple[str, str, str, str]] = [
+    ("32_white_tee_olive_cargo", "Oversized White Tee + Olive Cargo Pants", "14_oversized_tee_flares",
+     "cargo_olive_photo"),
+    ("33_madras_blue_jeans", "Madras Plaid Shirt + Blue Jeans", "16_madras_grey_jeans", "jeans_mid_blue"),
+    ("34_green_tee_light_jeans", "Green Tee + Light-Wash Jeans", "15_green_tee_trackpants", "jeans_light_501"),
+    ("35_grey_overshirt_black_trackpants", "Grey Overshirt + Black Track Pants", "22_scout_overshirt_chinos",
+     "trackpants_black"),
+    ("36_sweater_beige_chinos", "Crewneck Sweater + Beige Chinos", "18_sweater_khakis", "chinos_beige"),
+    ("37_olive_overshirt_dark_jeans", "Olive Overshirt + Dark Rinse Jeans", "17_olive_overshirt_cargo",
+     "jeans_dark_dallas"),
+    ("38_white_tee_worn_jeans", "Oversized White Tee + Worn Jeans", "14_oversized_tee_flares", "jeans_worn_mended"),
+    ("39_green_tee_black_cargo", "Green Tee + Black Cargo Pants", "15_green_tee_trackpants", "cargo_black_work"),
+]
 
 
 # ----------------------------------------------------------------------------- fetch
