@@ -173,6 +173,11 @@ class App:
         self.depth_shift = (0.0, 0.0)
         self._depth_render: np.ndarray | None = None
         self._want_selfcal = False
+        import signal
+        def _on_usr1(*_):
+            self._want_selfcal = True
+            log.info("self-calibration trigger received (SIGUSR1); runs on the next tracked frame")
+        signal.signal(signal.SIGUSR1, _on_usr1)   # kill -USR1 <pid> = key t
         self._last_reopen = 0.0
         self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
         self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
@@ -378,14 +383,19 @@ class App:
         last_seq = [-1]
 
         def capture_fn():
-            t_end = time.perf_counter() + 1.0
-            while time.perf_counter() < t_end:
-                it = self.source.read()
-                if it is not None and it[2] != last_seq[0]:
-                    last_seq[0] = it[2]
-                    return it[0]
-                self.display.key(1)
-                time.sleep(0.002)
+            for attempt in range(2):
+                t_end = time.perf_counter() + 2.5
+                while time.perf_counter() < t_end:
+                    it = self.source.read()
+                    if it is not None and it[2] != last_seq[0]:
+                        last_seq[0] = it[2]
+                        return it[0]
+                    self.display.key(1)
+                    time.sleep(0.002)
+                log.warning("camera stalled during self-calibration; reopening")   # the MacBook camera does this ~8 s after opening
+                if not self.source.reopen():
+                    break
+                last_seq[0] = -1
             raise RuntimeError("camera stopped delivering frames during self-calibration")
 
         def show_fn(frame):
@@ -400,17 +410,28 @@ class App:
         except RuntimeError as e:
             log.error("self-calibration failed: %s", e)
             return
-        if res["H_body"] is None or res["n_body"] < int(scfg["min_body_discs"]):
-            log.error("self-calibration: only %d discs landed on the body (need %d). Stand more centrally in the beam "
-                      "and hold still; the wall mapping %s.", res["n_body"], int(scfg["min_body_discs"]),
-                      "was found" if res["H_wall"] is not None else "was not found either")
+        if res["H_body"] is None:
+            log.error("self-calibration failed: %d discs on the body, %d on the wall; no usable mapping. Stand centrally "
+                      "in the beam, hold still, dim the room; see out/selfcal_disc_*.jpg", res["n_body"], res["n_wall"])
             return
+        if res["n_body"] < int(scfg["min_body_discs"]):
+            log.warning("self-calibration: only %d body discs; mapping comes mostly from the wall (depth correction weak)", res["n_body"])
         which = self.calib.set_plane(res["H_body"], torso_px, float(scfg["change_frac"]))
-        self.calib.data.reproj_error_px = float(res["rms_body"])
+        self.calib.data.reproj_error_px = float(res["rms_body"] if res["rms_body"] is not None else 0.0)
         self.calib.data.verified = True
         self.calib.data.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + f" selfcal({which})"
-        if self.calib.data.gallery_rect is None:
-            self.calib.data.gallery_rect = [int(v) for v in self.cfg["compositor"]["gallery"]["rect"]]
+        # gallery strip: left band of the projector footprint (camera space), so it is always inside the beam
+        pw, ph = self.calib.projector_size
+        c = self.calib.unproject_points(np.array([[0, 0], [pw, 0], [pw, ph], [0, ph]], np.float64))
+        gx0, gy0 = max(c[0][0], c[3][0]), max(c[0][1], c[1][1])
+        gx1, gy1 = min(c[1][0], c[2][0]), min(c[2][1], c[3][1])
+        fw, fh = gx1 - gx0, gy1 - gy0
+        gcfg = self.cfg["compositor"]["gallery"]
+        strip_w = max(int(gcfg.get("fp_w_frac", 0.12) * fw), int(gcfg["thumb_size"] * gcfg["current_scale"]) + 24)
+        self.calib.data.gallery_rect = [int(gx0 + gcfg.get("fp_x_frac", 0.03) * fw), int(gy0 + gcfg.get("fp_y_frac", 0.08) * fh),
+                                        int(gx0 + gcfg.get("fp_x_frac", 0.03) * fw) + strip_w,
+                                        int(gy1 - gcfg.get("fp_y_frac", 0.08) * fh)]
+        self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
         self.calib.save()
         self.tracker.reset_reference()
         log.info("self-calibration saved as the %s plane: %d body discs, rms %.2f px, torso %.0f px%s", which,
@@ -432,11 +453,20 @@ class App:
         else:
             track = self.tracker.process(frame, ts)
         track = self.smoother.update(track)
+        if self.frames % int(self.cfg["logging"].get("status_every_frames", 150)) == 0:
+            log.info("status: %s facing %s sw %.0f px fps %.1f calib %s", "TRACKED" if track.ok else "no person",
+                     track.facing if track.ok else "-", track.shoulder_width, self.fps,
+                     "ok" if self.calib.ok else "MISSING")
+        if self.frames % 10 == 0 and Path(self.cfg["selfcal"].get("trigger_file", "out/calibrate.now")).exists():
+            Path(self.cfg["selfcal"].get("trigger_file", "out/calibrate.now")).unlink(missing_ok=True)
+            self._want_selfcal = True
+            log.info("self-calibration trigger file seen; runs on the next tracked frame")
         if self._want_selfcal and track.ok:
             self._want_selfcal = False
             self.run_self_calibration(track)
         for ev in self.gestures.update(track):
             self.gesture_log.append((now, ev))
+            log.info("gesture: %s", ev)
             self.last_gesture_t = now
             if ev == "next":
                 self.set_outfit(self.gallery.index + 1, now)

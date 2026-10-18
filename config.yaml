@@ -4,13 +4,17 @@ capture:
   source: "name:MacBook"    # camera index, video path, 'auto' (first streaming camera) or 'name:<substring>' (AVFoundation device name)
   width: 1280               # processing (camera-space) size
   height: 720
+  native_width: 1920        # live cameras: request this capture size ...
+  native_height: 1080
+  crop: [320, 180, 1600, 900]   # ... and crop this native rect before resizing to camera space (1.5x zoom on the mark)
   fps: 30
   resize_interpolation: area   # area | linear  (area = better mask edges, 6 ms on 4K; linear = 0.4 ms)
   video_loop: true
   video_realtime: true      # play files at their native fps
   stale_ms: 500             # no new frame for this long -> projector shows black (safety)
   reopen_s: 3               # no new frame for this long -> release and reopen the camera (re-probes 'auto')
-  stall_exit_s: 40          # no new frame for this long (incl. reopen attempts) -> exit with an error
+  stall_exit_s: 600         # no new frame for this long (incl. reopen attempts) -> exit with an error
+  black_mean: 2.0           # frames darker than this mean are treated as 'no frame' (macOS black-frame stall)
 
 tracker:
   backend: mediapipe        # mediapipe | rtmlib
@@ -43,6 +47,7 @@ tracker:
     close_kernel_px: 5
     erode_px: 6
     temporal_alpha: 0.45    # EMA weight of the newest mask (1.0 = no smoothing)
+    mask_hold_frames: 4        # clothes pixels persist this many frames after a segmenter dropout (clipped to the silhouette)
     area_jump_fallback: 0.40   # fall back to skeleton when clothes area changes more than this fraction ...
     area_jump_frames: 2        # ... for this many consecutive frames
     seg_crop_margin_frac: 0.25 # segmenter runs on the person's bbox grown by this fraction (2x mask resolution)
@@ -70,10 +75,12 @@ tracker:
     use_person_mask: true   # also union the pose person-mask pixels above the shoulders
     search_window_frac: 0.75   # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
     side_width_floor_frac: 0.7 # in side view size the box/skeleton from at least this fraction of the reference shoulder width
+  max_shoulder_px: 320      # wider shoulders = someone at the lens, not in the beam: ignored
   facing:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
     hold_frames: 6
     ref_window_frames: 600  # frontal reference = max shoulder width over this many recent frames (~20 s): self-healing
+    ref_percentile: 90        # frontal reference = this percentile of the window (not the max: outlier-proof)
     face_vis_back_threshold: 0.0   # weak "back" hint from face visibility: off (MediaPipe reports ~1.0 from behind; Vision confidences drop with distance)
 
 smoothing:
@@ -347,10 +354,17 @@ accuracy:                   # scripts/accuracy_check.py (BUILD_SPEC_3D section 1
   sim_shift_min_frac: 0.4
 
 selfcal:                    # self-service calibration (T-pose or key t): discs over the projector frame, person stands still
-  grid: [6, 4]              # cols x rows of discs
+  grid: [6, 4]              # cols x rows of discs (first pass, whole projector frame)
+  body_grid: [3, 5]         # cols x rows of discs aimed at the body in the second pass
+  blind_top_frac: 0.3       # first pass without a mapping yet: no discs in this top band (head)
+  settle_frames: 5          # frames to wait after a pattern change (camera latency)
+  median_frames: 2          # frames per capture (per-pixel median)
+  initial_settle_s: 1.0     # black before the first disc (auto exposure settles)
   margin_frac: 0.08
   disc_radius_px: 28        # projector px
-  disc_level: 120           # grey level of the discs (dim: they may briefly cross the face)
+  disc_level: 190           # grey level of the discs (brief; the head region is excluded from detection and skipped once a mapping exists)
   head_pad_px: 40           # camera px around the head box where discs are ignored / not projected
   change_frac: 0.25         # torso length change that counts as a second standing distance
-  min_body_discs: 4
+  min_body_discs: 3
+  debug_images: 6           # out/selfcal_disc_XX.jpg (lit | difference) for the first discs
+  trigger_file: out/calibrate.now   # `touch` this file to start self-calibration remotely (same as key t)

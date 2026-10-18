@@ -109,6 +109,10 @@ class FrameSource:
         self.size = (int(cfg["width"]), int(cfg["height"]))
         self.interp = _INTERP[cfg.get("resize_interpolation", "area")]
         self.is_file = isinstance(self.source, str)
+        self.black_mean = float(cfg.get("black_mean", 2.0))
+        self._black_warned = False
+        crop = cfg.get("crop")
+        self.crop = None if not crop else tuple(int(v) for v in crop)   # x0,y0,x1,y1 of the native frame (zoom)
         self._lock = threading.Lock()
         self._frame: np.ndarray | None = None
         self._ts = 0.0
@@ -130,8 +134,10 @@ class FrameSource:
                     "and check `python main.py --list-cameras`." if not self.is_file else "Check the path / codec.")
             raise RuntimeError(f"Could not open source {self.source!r}. {hint}")
         if not self.is_file:
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.size[0])
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.size[1])
+            nw = int(self.cfg.get("native_width") or self.size[0])
+            nh = int(self.cfg.get("native_height") or self.size[1])
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, nw)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, nh)
             cap.set(cv2.CAP_PROP_FPS, float(self.cfg.get("fps", 30)))
         w, h = cap.get(cv2.CAP_PROP_FRAME_WIDTH), cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -215,6 +221,16 @@ class FrameSource:
                 log.error("source %r stopped delivering frames", self.source)
                 break
             ts = time.perf_counter()
+            if not self.is_file and float(frame[::32, ::32].mean()) < self.black_mean:
+                # the macOS backend returns zero frames at full rate while the session is not actually streaming
+                if not self._black_warned:
+                    log.warning("camera %r delivers black frames (session not streaming); waiting for the reopen", self.source_spec)
+                    self._black_warned = True
+                continue
+            self._black_warned = False
+            if self.crop is not None and not self.is_file:
+                x0, y0, x1, y1 = self.crop
+                frame = frame[y0:y1, x0:x1]
             if frame.shape[1] != self.size[0] or frame.shape[0] != self.size[1]:
                 frame = cv2.resize(frame, self.size, interpolation=self.interp)
             with self._lock:

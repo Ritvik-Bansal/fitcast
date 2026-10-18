@@ -68,6 +68,7 @@ class FacingClassifier:
         self.hold = int(cfg["hold_frames"])
         self.window = int(cfg["ref_window_frames"])
         self.face_thr = float(cfg["face_vis_back_threshold"])
+        self.ref_pct = float(cfg.get("ref_percentile", 90))   # robust 'frontal' reference: one bad frame cannot inflate it
         self.reset()
 
     def reset(self) -> None:
@@ -89,13 +90,13 @@ class FacingClassifier:
         hips_ok = hips_in_frame and vis[L_HIP] >= min_vis and vis[R_HIP] >= min_vis
         self._ring_px[self._i_px % self.window] = sw
         self._i_px += 1
-        self.ref_px = float(self._ring_px[: min(self._i_px, self.window)].max())
+        self.ref_px = float(np.percentile(self._ring_px[: min(self._i_px, self.window)], self.ref_pct))
         if hips_ok:
             norm = geo.torso_length(joints)
             width = sw / norm if norm > 1e-3 else sw
             self._ring_norm[self._i_norm % self.window] = width
             self._i_norm += 1
-            self.ref_norm = float(self._ring_norm[: min(self._i_norm, self.window)].max())
+            self.ref_norm = float(np.percentile(self._ring_norm[: min(self._i_norm, self.window)], self.ref_pct))
             ref = self.ref_norm
         else:
             width, ref = sw, self.ref_px
@@ -423,6 +424,9 @@ class Tracker:
         # reusable buffers
         self._cat = np.zeros((self.H, self.W), np.uint8)
         self._clothes = np.zeros((self.H, self.W), np.uint8)
+        self.hold_frames = int(mcfg.get("mask_hold_frames", 4))
+        self.max_shoulder_px = float(cfg.get("max_shoulder_px", 0.3 * self.W))
+        self._hold = np.zeros((self.H, self.W), np.uint8)
         self._skel = np.zeros((self.H, self.W), np.uint8)
         self._gate = np.zeros((self.H, self.W), np.uint8)
         self._tmp = np.zeros((self.H, self.W), np.uint8)
@@ -491,6 +495,8 @@ class Tracker:
             if self.footprint is not None and cv2.pointPolygonTest(self.footprint, (float(c[0]), float(c[1])), False) < 0:
                 continue
             sw = float(np.hypot(*(j[L_SHOULDER, :2] - j[R_SHOULDER, :2])))
+            if sw > self.max_shoulder_px:        # someone leaning into the lens can never be the person in the beam
+                continue
             score = sw
             if self._prev_center is not None:
                 score -= 0.5 * float(np.hypot(*(c - self._prev_center)))   # continuity
@@ -675,6 +681,16 @@ class Tracker:
                 cv2.bitwise_not(self._tmp2, dst=self._tmp2)
                 cv2.bitwise_and(self._tmp, self._tmp2, dst=self._tmp)
                 cv2.bitwise_or(mask, self._tmp, dst=mask)
+
+        # temporal hold: a pixel that was clothes stays clothes for `mask_hold_frames` more frames (projection on the
+        # fabric confuses the segmenter for a frame or two); the hold is clipped to the current person silhouette
+        if self.hold_frames > 0:
+            cv2.subtract(self._hold, 1, dst=self._hold)                 # saturating: floors at 0
+            np.copyto(self._hold, self.hold_frames, where=mask.view(bool))
+            cv2.threshold(self._hold, 0, 255, cv2.THRESH_BINARY, dst=mask)
+            if person is not None:
+                np.copyto(self._tmp, self._pf, casting="unsafe")
+                cv2.bitwise_and(mask, self._tmp, dst=mask)
 
         # head box: landmarks + person pixels + hair/face-skin pixels above the shoulders
         hairface = None
