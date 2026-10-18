@@ -141,18 +141,23 @@ class Compositor:
         panel = out[y0:y1, x0:x1]
         panel[:] = g["bg_color"]
         pw, ph = x1 - x0, y1 - y0
-        n = len(gal.outfits)
+        items = gal.bottom_cycle if (gal.strip == "bottoms" and gal.bottom_cycle) else list(range(len(gal.outfits)))
+        n = len(items)
         ts, scale = int(g["thumb_size"]), float(g["current_scale"])
         big = int(ts * scale)
         vertical = ph >= pw
         spacing = int(ts * 1.25)
         # animated virtual index (the strip follows whichever part was swiped last)
         cur = gal.bottom_index if (gal.strip == "bottoms" and gal.bottom_index >= 0) else gal.index
+        prev = gal.prev_index
+        if gal.strip == "bottoms" and gal.bottom_cycle:        # positions within the distinct-bottoms cycle
+            cur = items.index(cur) if cur in items else 0
+            prev = items.index(prev) if prev in items else cur
         t = _ease((now - gal.changed_at) / (float(g["anim_ms"]) / 1000.0)) if g["anim_ms"] > 0 else 1.0
-        d = cur - gal.prev_index
+        d = cur - prev
         if abs(d) > n / 2:  # wrap-around: take the short way
             d -= np.sign(d) * n
-        vidx = gal.prev_index + d * t
+        vidx = prev + d * t
         accent = tuple(int(c) for c in g["accent_color"])
         text_h = int(70 * float(g["font_scale"]) / 0.55)
         # centre of the strip (leave room for text at the bottom)
@@ -174,7 +179,7 @@ class Compositor:
             tx1, ty1 = tx0 + s, ty0 + s
             if tx0 < 0 or ty0 < 0 or tx1 > pw or ty1 > ph - text_h:
                 continue
-            panel[ty0:ty1, tx0:tx1] = self._thumb(gal, i, s)
+            panel[ty0:ty1, tx0:tx1] = self._thumb(gal, items[i], s)
             if is_cur:
                 cv2.rectangle(panel, (tx0 - 3, ty0 - 3), (tx1 + 2, ty1 + 2), accent, 3)
         fs = float(g["font_scale"])

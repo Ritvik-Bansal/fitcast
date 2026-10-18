@@ -147,6 +147,12 @@ class App:
                             "--demo", "--config", args.config], check=True)
             outfits = load_outfits(cfg["garments"])
         self.gallery = GalleryState(outfits=outfits, index=args.outfit % len(outfits), prev_index=args.outfit % len(outfits))
+        seen: set = set()
+        for i, o in enumerate(outfits):            # bottom swipes cycle distinct bottoms only (many demo outfits share "Jeans")
+            key = o.name.split(" + ")[-1] if o.bottom_front is not None else None
+            if key is not None and key not in seen:
+                seen.add(key)
+                self.gallery.bottom_cycle.append(i)
         log.info("%d outfits loaded: %s", len(outfits), ", ".join(o.id for o in outfits))
         proj = (int(cfg["calibration"]["projector_width"]), int(cfg["calibration"]["projector_height"]))
         self.display = Display(cfg["display"], proj, (args.projector_x, args.projector_y), headless=args.no_window)
@@ -207,7 +213,11 @@ class App:
         """Swipe below the hips: change the bottoms only; the top stays."""
         g = self.gallery
         cur = g.bottom_index if g.bottom_index >= 0 else g.index
-        g.prev_index, g.bottom_index = cur, idx % len(g.outfits)
+        cyc = g.bottom_cycle or list(range(len(g.outfits)))
+        cur_name = g.outfits[cur].name.split(" + ")[-1]
+        pos = next((k for k, i in enumerate(cyc) if g.outfits[i].name.split(" + ")[-1] == cur_name), 0)
+        step = 1 if idx > cur else -1
+        g.prev_index, g.bottom_index = cur, cyc[(pos + step) % len(cyc)]
         g.strip, g.changed_at = "bottoms", now
         log.info("bottoms -> %s", g.current.name)
 
