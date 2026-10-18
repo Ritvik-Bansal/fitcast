@@ -172,6 +172,7 @@ class App:
         self._torso_ema: float | None = None
         self.depth_shift = (0.0, 0.0)
         self._depth_render: np.ndarray | None = None
+        self._want_selfcal = False
         self._last_reopen = 0.0
         self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
         self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
@@ -211,6 +212,8 @@ class App:
             self.gallery.visible = not self.gallery.visible
         elif k == ord("b"):
             self.relearn_background()
+        elif k == ord("t"):
+            self._want_selfcal = True             # run on the next tracked frame (needs the person's mask)
         elif k == ord("k"):
             self.show_skeleton = not self.show_skeleton
             log.info("skeleton on projector: %s", self.show_skeleton)
@@ -359,6 +362,61 @@ class App:
         self._depth_render[y0:y1, x0:x1] = fill
         return self._depth_render
 
+    def run_self_calibration(self, track) -> None:
+        """Person-triggered calibration (T-pose / key t): project dim discs one at a time, use the ones that land on
+        the body to solve the camera->projector mapping at the person's distance (second distance -> two-plane model).
+        Blocks the loop for ~8 s; the person must stand still."""
+        if self.args.no_window or self.sensor_kind == "iphone" or not track.ok:
+            log.warning("self-calibration needs the projector window, the webcam path and a tracked person")
+            return
+        from fitcast import geometry as _geo
+        from fitcast.selfcal import self_calibrate
+        scfg = self.cfg["selfcal"]
+        person = track.person_mask if track.person_mask is not None else track.clothes_mask
+        torso_px = float(_geo.torso_length(track.joints))
+        proj_size = (int(self.cfg["calibration"]["projector_width"]), int(self.cfg["calibration"]["projector_height"]))
+        last_seq = [-1]
+
+        def capture_fn():
+            t_end = time.perf_counter() + 1.0
+            while time.perf_counter() < t_end:
+                it = self.source.read()
+                if it is not None and it[2] != last_seq[0]:
+                    last_seq[0] = it[2]
+                    return it[0]
+                self.display.key(1)
+                time.sleep(0.002)
+            raise RuntimeError("camera stopped delivering frames during self-calibration")
+
+        def show_fn(frame):
+            self.display.show_projector(frame)
+            self.display.key(1)
+
+        log.info("self-calibration starting: hold still (%d discs, ~%d s)", int(scfg["grid"][0]) * int(scfg["grid"][1]),
+                 int(scfg["grid"][0]) * int(scfg["grid"][1]) * (int(self.cfg["calibration"]["settle_frames"]) + int(self.cfg["calibration"]["median_frames"])) // 30 + 1)
+        try:
+            res = self_calibrate(scfg, self.cfg["calibration"], self.calib, proj_size, capture_fn, show_fn,
+                                 person, track.head_box, torso_px, log_fn=log.info)
+        except RuntimeError as e:
+            log.error("self-calibration failed: %s", e)
+            return
+        if res["H_body"] is None or res["n_body"] < int(scfg["min_body_discs"]):
+            log.error("self-calibration: only %d discs landed on the body (need %d). Stand more centrally in the beam "
+                      "and hold still; the wall mapping %s.", res["n_body"], int(scfg["min_body_discs"]),
+                      "was found" if res["H_wall"] is not None else "was not found either")
+            return
+        which = self.calib.set_plane(res["H_body"], torso_px, float(scfg["change_frac"]))
+        self.calib.data.reproj_error_px = float(res["rms_body"])
+        self.calib.data.verified = True
+        self.calib.data.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + f" selfcal({which})"
+        if self.calib.data.gallery_rect is None:
+            self.calib.data.gallery_rect = [int(v) for v in self.cfg["compositor"]["gallery"]["rect"]]
+        self.calib.save()
+        self.tracker.reset_reference()
+        log.info("self-calibration saved as the %s plane: %d body discs, rms %.2f px, torso %.0f px%s", which,
+                 res["n_body"], res["rms_body"], torso_px,
+                 "" if which == "second" else " (T-pose again ~1 m closer or farther for depth tracking)")
+
     def relearn_background(self) -> None:
         """Key b: forget the depth background and learn it again from the next N frames (step out of the beam)."""
         if self.depth_mask is not None:
@@ -374,6 +432,9 @@ class App:
         else:
             track = self.tracker.process(frame, ts)
         track = self.smoother.update(track)
+        if self._want_selfcal and track.ok:
+            self._want_selfcal = False
+            self.run_self_calibration(track)
         for ev in self.gestures.update(track):
             self.gesture_log.append((now, ev))
             self.last_gesture_t = now
@@ -383,6 +444,8 @@ class App:
                 self.set_outfit(self.gallery.index - 1, now)
             elif ev == "toggle_gallery":
                 self.gallery.visible = not self.gallery.visible
+            elif ev == "calibrate":
+                self.run_self_calibration(track)
         self.sizing.update(track)
         self.gallery.size_text, self.gallery.measure_text = self.sizing.recommendation(self.gallery.current.size_table)
         if self.args.demo:
@@ -421,7 +484,7 @@ class App:
                 # tracking lost: fade exactly what was last projected (projector space); never the 2D mapping
                 proj = cv2.convertScaleAbs(self._proj_cache, alpha=self.compositor.fade, beta=0)
         else:
-            proj = self.calib.to_projector(comp, shift)
+            proj = self.calib.to_projector(comp, shift, torso_px=self._torso_ema)
         t2 = time.perf_counter()
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)

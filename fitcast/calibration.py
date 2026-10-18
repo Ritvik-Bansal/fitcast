@@ -62,6 +62,8 @@ class CalibrationData:
     simulated: bool = False             # produced by --simulate: never valid for a real camera
     depth_ref_torso_px: float | None = None   # torso length (px) at the standing spot H was refined for
     depth_slope: list[float] | None = None    # camera-px shift per px of torso length away from that spot (dx, dy)
+    H2: np.ndarray | None = None              # second camera->projector homography at another standing distance ...
+    depth_ref2_torso_px: float | None = None  # ... with the torso length (px) measured there (self-calibration)
 
 
 def _size(s) -> tuple[int, int]:
@@ -96,7 +98,8 @@ def _rescale_data(d: CalibrationData, new_size: tuple[int, int]) -> CalibrationD
     return dataclasses.replace(d, H=H / H[2, 2], camera_size=new_size, gallery_rect=rect,
                                verify_max_err_px=verr, simulated=d.simulated,
                                depth_ref_torso_px=None if d.depth_ref_torso_px is None else d.depth_ref_torso_px * (sx + sy) / 2,
-                               depth_slope=d.depth_slope)
+                               depth_slope=d.depth_slope, H2=None if d.H2 is None else (lambda M: M / M[2, 2])(d.H2 @ np.linalg.inv(_resize_matrix(d.camera_size, new_size))),
+                               depth_ref2_torso_px=None if d.depth_ref2_torso_px is None else d.depth_ref2_torso_px * (sx + sy) / 2)
 
 
 def _data_from_dict(raw) -> CalibrationData:
@@ -124,6 +127,8 @@ def _data_from_dict(raw) -> CalibrationData:
         simulated=bool(raw.get("simulated", False)),
         depth_ref_torso_px=None if raw.get("depth_ref_torso_px") is None else float(raw["depth_ref_torso_px"]),
         depth_slope=None if raw.get("depth_slope") is None else [float(v) for v in raw["depth_slope"]],
+        H2=None if raw.get("H2") is None else np.asarray(raw["H2"], np.float64),
+        depth_ref2_torso_px=None if raw.get("depth_ref2_torso_px") is None else float(raw["depth_ref2_torso_px"]),
     )
 
 
@@ -215,6 +220,8 @@ class Calibration:
             "simulated": bool(d.simulated),
             "depth_ref_torso_px": None if d.depth_ref_torso_px is None else float(d.depth_ref_torso_px),
             "depth_slope": None if d.depth_slope is None else [float(v) for v in d.depth_slope],
+            "H2": None if d.H2 is None else [[float(v) for v in row] for row in d.H2],
+            "depth_ref2_torso_px": None if d.depth_ref2_torso_px is None else float(d.depth_ref2_torso_px),
         }
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("# FitCast calibration: H maps camera px -> projector px. "
@@ -238,7 +245,40 @@ class Calibration:
         dt = float(torso_px) - float(d.depth_ref_torso_px)
         return float(d.depth_slope[0]) * dt, float(d.depth_slope[1]) * dt
 
-    def to_projector(self, img_cam: np.ndarray, shift: tuple[float, float] | None = None) -> np.ndarray:
+    def H_for(self, torso_px: float | None) -> np.ndarray:
+        """Camera->projector homography for a person whose torso length is `torso_px`: linear interpolation
+        between the two self-calibrated planes (exact for a pinhole pair, since H is affine in 1/distance and
+        1/distance is proportional to the apparent torso length). Falls back to H without a second plane."""
+        d = self._require()
+        if torso_px is None or d.H2 is None or d.depth_ref_torso_px is None or d.depth_ref2_torso_px is None:
+            return d.H
+        t0, t2 = float(d.depth_ref_torso_px), float(d.depth_ref2_torso_px)
+        if abs(t2 - t0) < 1e-6:
+            return d.H
+        a = (float(torso_px) - t0) / (t2 - t0)
+        a = float(np.clip(a, float(self.cfg.get("depth_interp_min", -0.5)), float(self.cfg.get("depth_interp_max", 1.5))))
+        H = d.H + a * (d.H2 - d.H)
+        return H / H[2, 2]
+
+    def set_plane(self, H: np.ndarray, torso_px: float, change_frac: float = 0.25) -> str:
+        """Store a self-calibrated plane. Same distance as the reference (within `change_frac`) -> replace the
+        primary H; clearly different -> becomes the second plane. Returns 'primary' | 'second'."""
+        H = np.asarray(H, np.float64); H = H / H[2, 2]
+        d = self.data
+        if d is None or d.depth_ref_torso_px is None or abs(torso_px - d.depth_ref_torso_px) / d.depth_ref_torso_px <= change_frac:
+            if d is None:
+                d = CalibrationData(H=H, camera_size=self.camera_size, projector_size=self.projector_size,
+                                    reproj_error_px=0.0, timestamp=datetime.now().isoformat(timespec="seconds"),
+                                    gallery_rect=None, verified=False, verify_max_err_px=None)
+            d.H, d.depth_ref_torso_px, d.depth_slope = H, float(torso_px), None
+            self._set_data(d)
+            return "primary"
+        d.H2, d.depth_ref2_torso_px, d.depth_slope = H, float(torso_px), None
+        self._set_data(d)
+        return "second"
+
+    def to_projector(self, img_cam: np.ndarray, shift: tuple[float, float] | None = None,
+                     torso_px: float | None = None) -> np.ndarray:
         """Warp a camera-space image into the (ph, pw) projector frame. `shift` = (dx, dy) camera px the light
         would land away from the intended spot at the person's current depth (see `depth_shift`); it is
         compensated by pre-translating the image.
@@ -252,7 +292,7 @@ class Calibration:
             if (w, h) != self.camera_size:
                 raise ValueError(f"to_projector got a {w}x{h} image, calibration camera space is "
                                  f"{self.camera_size[0]}x{self.camera_size[1]}")
-            M = self.data.H
+            M = self.H_for(torso_px) if torso_px is not None else self.data.H
             if shift is not None and (shift[0] or shift[1]):
                 M = M @ np.array([[1.0, 0.0, -shift[0]], [0.0, 1.0, -shift[1]], [0.0, 0.0, 1.0]])
         else:

@@ -38,6 +38,11 @@ class GestureDetector:
         self.person_right_is_next = bool(cfg["person_right_is_next"])
         self.mirror_x = bool(cfg["mirror_x"])
         self.raise_hands_s = float(cfg["raise_hands_s"])  # <= 0 disables the gesture
+        self.tpose_s = float(cfg.get("tpose_s", 2.0))         # <= 0 disables the T-pose calibration trigger
+        self.tpose_level_sw = float(cfg.get("tpose_level_sw", 0.3))
+        self.tpose_reach_sw = float(cfg.get("tpose_reach_sw", 1.1))
+        self._tpose_since: float | None = None
+        self._tpose_fired = False
         self.log_events = bool(cfg["log_events"])
         self.min_vis = float(cfg.get("min_wrist_visibility", _DEFAULT_MIN_WRIST_VISIBILITY))
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
@@ -51,6 +56,7 @@ class GestureDetector:
         self.reset()
 
     def reset(self) -> None:
+        self._tpose_since, self._tpose_fired = None, False
         """Forget motion history, cooldown and raise-hands state."""
         self._clear()
         self._cooldown_until = -math.inf
@@ -85,6 +91,8 @@ class GestureDetector:
 
         if self._raise_hands(now, j, vis, nose_y):
             return ["toggle_gallery"]
+        if self._tpose(now, j, vis, sw):
+            return ["calibrate"]
 
         for idx, side, buf in self._wrists:
             wx, wy = float(j[idx, 0]), float(j[idx, 1])
@@ -122,6 +130,29 @@ class GestureDetector:
         """
         toward_person_right = (dx < 0.0) != self.mirror_x
         return "next" if toward_person_right == self.person_right_is_next else "prev"
+
+    def _tpose(self, now: float, j: np.ndarray, vis: np.ndarray, sw: float) -> bool:
+        """Both arms straight out to the sides (wrists at shoulder height, beyond the shoulders by > tpose_reach_sw)
+        held for `tpose_s` seconds -> one "calibrate" event; re-arms when the pose breaks."""
+        if self.tpose_s <= 0.0:
+            return False
+        ok = (vis[L_WRIST] >= self.min_vis and vis[R_WRIST] >= self.min_vis and
+              abs(j[L_WRIST, 1] - j[L_SHOULDER, 1]) < self.tpose_level_sw * sw and
+              abs(j[R_WRIST, 1] - j[R_SHOULDER, 1]) < self.tpose_level_sw * sw and
+              abs(j[L_WRIST, 0] - j[L_SHOULDER, 0]) > self.tpose_reach_sw * sw and
+              abs(j[R_WRIST, 0] - j[R_SHOULDER, 0]) > self.tpose_reach_sw * sw and
+              (j[L_WRIST, 0] - j[L_SHOULDER, 0]) * (j[R_WRIST, 0] - j[R_SHOULDER, 0]) < 0)   # opposite sides
+        if not ok:
+            self._tpose_since, self._tpose_fired = None, False
+            return False
+        if self._tpose_since is None:
+            self._tpose_since = now
+        if self._tpose_fired or now - self._tpose_since < self.tpose_s:
+            return False
+        self._tpose_fired = True
+        if self.log_events:
+            log.info("calibrate (T-pose) t=%.3f held=%.2fs", now, now - self._tpose_since)
+        return True
 
     def _raise_hands(self, now: float, j: np.ndarray, vis: np.ndarray, nose_y: float) -> bool:
         """Advance the both-hands-above-head timer; True on the frame it fires."""

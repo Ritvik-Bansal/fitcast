@@ -140,6 +140,9 @@ gestures:
   person_right_is_next: true   # swipe toward the person's own right -> next outfit
   mirror_x: false           # set true if the camera feed is horizontally mirrored
   raise_hands_s: 1.0
+  tpose_s: 2.0              # arms straight out to the sides for this long -> self-calibration ("calibrate" event)
+  tpose_level_sw: 0.3       # wrist within this many shoulder widths of shoulder height
+  tpose_reach_sw: 1.1       # wrist at least this far outside the shoulder
   min_wrist_visibility: 0.5
   min_samples: 4            # a swipe needs at least this many samples in the window (rejects landmark jumps)
   log_events: true
@@ -160,6 +163,8 @@ calibration:
   max_reproj_px: 10         # calibrations above this RMS (projector px) are neither saved by --auto nor loaded
   settle_frames: 10         # frames to wait after changing the projected pattern
   blur_ksize: 5             # gaussian blur on the lit-minus-dark difference image (odd)
+  depth_interp_min: -0.5    # two-plane model: clamp of the interpolation factor between the two self-calibrated planes
+  depth_interp_max: 1.5
   ransac_reproj_px: 8.0     # RANSAC inlier threshold, projector px (~5 camera px)
   min_fill_ratio: 0.6       # marker blobs must fill >= this of their bounding box (a disc is 0.785)
   max_aspect: 2.0           # and be at most this elongated
@@ -340,3 +345,12 @@ accuracy:                   # scripts/accuracy_check.py (BUILD_SPEC_3D section 1
   sim_max_median_mm: 3.0
   sim_shift_min_ratio: 3.0
   sim_shift_min_frac: 0.4
+
+selfcal:                    # self-service calibration (T-pose or key t): discs over the projector frame, person stands still
+  grid: [6, 4]              # cols x rows of discs
+  margin_frac: 0.08
+  disc_radius_px: 28        # projector px
+  disc_level: 120           # grey level of the discs (dim: they may briefly cross the face)
+  head_pad_px: 40           # camera px around the head box where discs are ignored / not projected
+  change_frac: 0.25         # torso length change that counts as a second standing distance
+  min_body_discs: 4
