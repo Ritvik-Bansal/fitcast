@@ -6,7 +6,7 @@ capture:
   height: 720
   native_width: 1920        # live cameras: request this capture size ...
   native_height: 1080
-  crop: [320, 180, 1600, 900]   # ... and crop this native rect before resizing to camera space (1.5x zoom on the mark)
+  crop: [320, 320, 1600, 1040]  # ... and crop this native rect before resizing to camera space (shifted down: the beam sits low in this room)
   fps: 30
   resize_interpolation: area   # area | linear  (area = better mask edges, 6 ms on 4K; linear = 0.4 ms)
   video_loop: true
