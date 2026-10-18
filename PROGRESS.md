@@ -115,3 +115,18 @@ Each milestone: what was run, what was observed.
 - MAJORs fixed: depth mask now runs at the sensor's depth resolution with K scaled (morphology radii mean depth px again; learn 37 ms instead of 720 ms); head box forced to an opaque surface at body depth before the GPU render (depth-less heads were transparent to wall content); 2D calibration no longer loaded/applied on the phone path when calibration3d exists; projector K_cam from calibration3d with a drift warning; key `r` crash on the sensor source; single-lock `IPhoneSensor.latest()` (image/track/conf/seg from the same frame); NEAREST image sampling in render3d (LINEAR bled light across the head-box edge); planarity gate in calibrate3d (5-95% depth span >= 0.35 m or refuse); moderngl/glcontext/pymobiledevice3 declared; iphone camera space 960x720 (square pixels); default-dict keys moved into config.yaml.
 - Not yet done from the review: phone-side person selection by footprint (largest bbox today), `pose_ts` into the prediction horizon, allocation-free `_publish`, duplicate facing/head work in the receiver, live calibrate3d verification measured in px/mm (visual only).
 - New test `tests/test_iphone_path.py` drives `App.step` against the fake phone with an empty-scene phase: background ready < 1.6 s, 3D path used, head box black, 0 calls to the 2D mapping on loss.
+
+## 2026-10-17 (evening) — webcam-only self-calibration, live on the Epson + MacBook camera
+- Pivot: no LiDAR, no phone. MacBook camera (1920x1080 native, 1.5x centre crop -> 1280x720 camera space) at the projector.
+- Self-calibration (file trigger `out/calibrate.now`, key `t`, SIGUSR1, or T-pose): 24 dim discs (head band skipped) -> wall
+  homography; 15 discs aimed at the body -> similarity correction; then a Gray-code dense scan (46 patterns at level 170,
+  head blacked out through the disc-pass mapping) -> body plane from ~2.5k points (rms 2.2-3.7 px), wall plane, and
+  upper/lower body planes split at the hips (`D_upper`/`D_lower`, feathered warp). Green dot mesh shown for 3 s as the check.
+- Live numbers (room lights on, 4 m): wall rms 1.1-1.7 px, body rms 2.2-3.7 px, residual median 2-5 px (~0.3-0.7 cm).
+- Mask: `silhouette` mode = segmenter non-background minus zoned skin/face/hair, unioned with the skeleton capsules and
+  clipped to capsules+0.5 SW; 6-frame hold. Baggy grey sweatpants on a white wall are now fully covered without flicker.
+- Head box bottom at the chin (+0.15 SW); search window 0.4 SW. Too-close person filter (sw > 320 px ignored).
+- Camera: black-frame stall detection + reopen; stall_exit 600 s. Debug view dumped to `out/live_debug.jpg` every 45 frames.
+- Tests: 117+ passing (`tests/test_selfcal.py` covers the two-plane rig and the split warp).
+- Open: second-distance T-pose (two-plane depth model) not yet exercised live; gesture reach threshold still generous;
+  the dense scan cannot decode clipped white fabric (now excluded) so torso points come mostly from the disc pass + arms.

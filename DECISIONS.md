@@ -43,3 +43,20 @@
 - 3D path research (2026-10-17): phone is iPhone 17 Pro on iOS 27.2 beta (24B5089g), Mac has Xcode 26.2 / SDK 26.2 -> device deploy must be tested first. ARKit: `.sceneDepth`+`.personSegmentationWithDepth` combination is undocumented (check `supportsFrameSemantics` on the exact set; assigning an unsupported set throws an uncatchable NSException); depth arrives as DepthFloat32 (convert to F16 for the wire); 256x192 is community-reported only, read sizes at runtime. Vision: iOS 18 `DetectHumanBodyPoseRequest`, 19 joints, `toImageCoordinates(size, origin: .upperLeft)`; phone mounted landscape with USB-C on the right -> orientation `.up`. 3D Vision pose needs AVDepthData (no ARDepthData bridge) -> primary path is 2D Vision + LiDAR lift. Transport: iOS `NWListener` TCP; Mac side plain usbmuxd `Connect` over /var/run/usbmuxd (stdlib plist client, no RSD tunnel needed for port forwarding), pymobiledevice3 only as fallback (async API, churns daily). RGB: VTPixelTransferSession downscale + VideoToolbox JPEG (independent frames; HEVC would need PyAV). OpenCV `GrayCodePattern.decode` is stereo-only; `getProjPixel` returns an ERROR flag (True = invalid) and is too slow per pixel -> vectorised numpy decoder (verified 0 mismatches vs getProjPixel). Expected wire load ~15-19 MB/s at 60 fps.
 - Device capability check on the iPhone 17 Pro, iOS 27.2 (2026-10-17 20:20): `ARWorldTrackingConfiguration` supports `.sceneDepth + .personSegmentationWithDepth` together (also +smoothedSceneDepth); `.sceneDepth + .bodyDetection` NOT supported -> design = Vision 2D pose + LiDAR lift (as preferred in the spec). Format 1920x1440 @ 60 fps wide camera; measured 60.0 fps over 10 s (601 frames); depth + segmentation 256x192 (L008 segmentation); hardware JPEG encoder present; focus locked (lens position 0.20); ARFrame.timestamp - CACurrentMediaTime = -38 ms (same clock). Xcode 26.2 builds/installs on iOS 27.2 beta fine; the only hurdle was the per-developer "Trust" blocked by Screen Time restrictions.
 - USB stream measured on the Mac: 60.0 fps, 15-17 MB/s, 0 dropped frames over 2710, usbmux RTT 1-4 ms, phone-send -> Mac 6 ms, ARFrame -> Mac 41-56 ms (dominated by on-phone capture/encode); LiDAR depth 100% valid at 3 m.
+
+## 2026-10-17 — webcam-only calibration and masking decisions
+- **Per-disc dark reference.** One dark frame per probe (not one per session): the MacBook camera's auto exposure cannot be
+  locked (AVFoundation reports no exposure modes) and drifts within a second, which made a single reference useless.
+- **Silhouette band + head box excluded from disc detection.** A few px of body sway between dark and lit captures makes
+  the silhouette edges brighter in the difference image than any disc; the face is excluded for the same reason and safety.
+- **Wall homography first, body as a similarity on top.** Discs on the wall are many and well spread; the body is narrow
+  and gives an ill-conditioned homography on its own. A 4-dof similarity in projector space is enough for a plane shift.
+- **Dense scan via Gray code, dimmed to 170.** Full white clips on white fabric and decodes wrong bits; clipped pixels are
+  excluded. The scan is accepted only with >=300 body points and >=50% inliers, otherwise the disc mapping stands.
+- **Upper/lower split model.** The residual map showed the torso 20 px off the leg plane with the camera ~1 m from the
+  projector lens; two planes blended across the hip line cost one extra warp (~4 ms) and remove it. Identity when the body
+  really is one plane (measured 1 px difference on the second person).
+- **Mask = capsules ∪ silhouette, clipped to capsules+margin.** Segmenters cannot separate light fabric from a white
+  wall; capsules are colour-proof. Skin is trusted only on forearms/hands and above the shoulder line because the
+  multiclass model labels white short sleeves as skin.
+- **Head box ends at the chin.** The spec's 0.25 SW margin below the face left the whole collar dark; sides/top keep it.

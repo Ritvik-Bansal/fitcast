@@ -501,16 +501,20 @@ class App:
         else:
             track = self.tracker.process(frame, ts)
         track = self.smoother.update(track)
-        if self.frames % int(self.cfg["logging"].get("debug_jpeg_every_frames", 45)) == 0 and track.ok:
+        if self.frames % int(self.cfg["logging"].get("debug_jpeg_every_frames", 45)) == 0:
             dbg = frame.copy()
-            if track.clothes_mask is not None:
+            if not track.ok:
+                cv2.putText(dbg, "no person tracked", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
+                cv2.imwrite("out/live_debug.jpg", dbg, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            elif track.clothes_mask is not None:
                 dbg[track.clothes_mask > 0] = (0.55 * dbg[track.clothes_mask > 0] + np.array([0, 112, 0])).astype(np.uint8)
-            x0, y0, x1, y1 = track.head_box
-            cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 0, 255), 2)
-            for a, b in ((11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24), (23, 24), (23, 25), (25, 27), (24, 26), (26, 28)):
-                if track.visibility[a] >= self.tracker.min_vis and track.visibility[b] >= self.tracker.min_vis:
-                    cv2.line(dbg, tuple(int(v) for v in track.joints[a, :2]), tuple(int(v) for v in track.joints[b, :2]), (0, 255, 255), 2)
-            cv2.imwrite("out/live_debug.jpg", dbg, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if track.ok:
+                x0, y0, x1, y1 = track.head_box
+                cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 0, 255), 2)
+                for a, b in ((11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24), (23, 24), (23, 25), (25, 27), (24, 26), (26, 28)):
+                    if track.visibility[a] >= self.tracker.min_vis and track.visibility[b] >= self.tracker.min_vis:
+                        cv2.line(dbg, tuple(int(v) for v in track.joints[a, :2]), tuple(int(v) for v in track.joints[b, :2]), (0, 255, 255), 2)
+                cv2.imwrite("out/live_debug.jpg", dbg, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if self.frames % int(self.cfg["logging"].get("status_every_frames", 150)) == 0:
             log.info("status: %s facing %s sw %.0f px fps %.1f calib %s", "TRACKED" if track.ok else "no person",
                      track.facing if track.ok else "-", track.shoulder_width, self.fps,
