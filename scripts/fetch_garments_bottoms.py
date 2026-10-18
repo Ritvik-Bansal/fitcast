@@ -3,8 +3,8 @@
 
 Companion of scripts/fetch_garments.py (whose cut-out and bottoms layout it reuses). Steps (default: both):
   fetch   download every MANIFEST photo into assets/garments/_raw_bottoms/ (own folder and sources.json,
-          so the main fetcher's _raw/ is never touched) and append/refresh the "Bottoms" section of
-          assets/garments/SOURCES.md (other sections are left as they are).
+          so the main fetcher's _raw/ is never touched). Both steps append/refresh only the "Bottoms"
+          section of assets/garments/SOURCES.md (other sections are left as they are).
   build   cut each photo out (fetch_garments.garment_rgba: threshold -> grabCut), lay it out over
           `garments.bottom_size` (fetch_garments.layout_bottom: crotch on the centre line, waist on top,
           hems at the bottom) and write outfit folders 32_* .. 39_* with prepare_garments.write_outfit.
@@ -52,7 +52,7 @@ NM_CREDIT = "Nordiska museet"
 # key -> Commons file + cut-out hints (same meaning as fetch_garments.MANIFEST):
 #   crop (x0, y0, x1, y1) normalized, white threshold, bg_dist, gamma (< 1 lifts dark fabric),
 #   open_frac (drops thin attachments: hanger hooks, stand poles), back_title (back-view photo of the same item),
-#   attribution (credit when Commons "Artist" names the maker or is empty), note (shown in SOURCES.md).
+#   attribution (credit when Commons "Artist" names the maker or is empty), back_hints (overrides for the back photo).
 MANIFEST: dict[str, dict] = {
     "cargo_olive_photo": dict(title="File:Cargo pants 001.jpg", back_title="File:Cargo pants 002.jpg",
                               crop=(0.0, 0.125, 1.0, 1.0), open_frac=0.01,
@@ -72,11 +72,14 @@ MANIFEST: dict[str, dict] = {
                              desc="black tapered track pants with gold side stripes"),
     "chinos_beige": dict(title="File:Chino pants.jpg", white=185, bg_dist=12, desc="beige straight chinos"),
     "jeans_dark_dallas": dict(title="File:Jeans Gul&Bl\u00e5 i modellen Dallas.jpg",
-                              attribution="Elisabeth Eriksson / " + NM_CREDIT, crop=(0.0, 0.0, 1.0, 0.95), gamma=0.7, desc="dark rinse straight jeans"),
+                              attribution="Elisabeth Eriksson / " + NM_CREDIT, crop=(0.0, 0.0, 1.0, 0.95), gamma=0.7,
+                              desc="dark rinse straight jeans"),
     "jeans_worn_mended": dict(title="File:Slitna jeans f\u00f6r m\u00e4n i bomull med lagade med sick-sacks\u00f6m "
                                     "p\u00e5 kn\u00e4na. 032s8YepsD7C.jpg",
-                              attribution=NM_CREDIT, crop=(0.0, 0.0, 0.88, 0.95), white=200, desc="worn mid-wash men's jeans with darned knees"),
-    "cargo_black_work": dict(title="File:Zwarte werkbroek met witte bies, van Bulgaarse bouwvakker, objectnr 91220-3.JPG",
+                              attribution=NM_CREDIT, crop=(0.0, 0.0, 0.88, 0.935), white=200, bg_dist=45,
+                              desc="worn mid-wash men's jeans with darned knees"),
+    "cargo_black_work": dict(title="File:Zwarte werkbroek met witte bies, van Bulgaarse bouwvakker, "
+                                   "objectnr 91220-3.JPG",
                              gamma=0.5, attribution="Museum Rotterdam",
                              desc="black cotton work cargo pants with white piping"),
 }
@@ -140,10 +143,9 @@ def _photo(raw_dir: Path, name: str, m: dict, cfg: dict) -> np.ndarray:
     bgr = cv2.imread(str(raw_dir / f"{name}.jpg"), cv2.IMREAD_COLOR)
     if bgr is None:
         raise FileNotFoundError(f"{raw_dir / (name + '.jpg')} missing; run `scripts/fetch_garments_bottoms.py fetch`")
-    rgba = garment_rgba(bgr, int(m.get("white", cfg["white_bg_threshold"])), m.get("crop"),
+    return garment_rgba(bgr, int(m.get("white", cfg["white_bg_threshold"])), m.get("crop"),
                         float(m.get("bg_dist", BG_DIST)), float(m.get("gamma", 1.0)),
                         float(m.get("open_frac", 0.0)), bool(m.get("smooth", False)))
-    return cv2.flip(rgba, 1) if m.get("mirror") else rgba
 
 
 def load_bottom(key: str, raw_dir: Path, cfg: dict) -> tuple[np.ndarray, np.ndarray | None]:
@@ -175,7 +177,7 @@ def write_pair(out_dir: Path, oid: str, name: str, top_src: Path, bottom: np.nda
     out_meta["top_body_region"] = top_meta["top_body_region"]
     out_meta["colors"] = list(top_meta.get("colors", [])[:1]) + out_meta["colors"]
     (folder / "meta.yaml").write_text(yaml.safe_dump(out_meta, sort_keys=False))
-    return f"{line} top<-{top_src.name}"
+    return f"{oid:<34} parts={','.join(out_meta['parts'])} {line.split('lum ', 1)[-1]} top<-{top_src.name}"
 
 
 def build(raw_dir: Path, out_dir: Path, cfg: dict) -> list[str]:
@@ -280,7 +282,6 @@ def main(argv: list[str] | None = None) -> int:
             fetch(raw)
         except RuntimeError as e:
             log.error("%s; building from whatever is already in %s", e, raw)
-        update_sources_md(out / "SOURCES.md", raw)
     ok = True
     if args.step in ("all", "build"):
         lines = build(raw, out, cfg)
@@ -288,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
             print(line)
         print(f"{len(lines)} outfits -> {out}")
         ok = len(lines) == len(PAIRS)
+    if args.step in ("all", "fetch", "build"):
+        update_sources_md(out / "SOURCES.md", raw)
     if args.step in ("all", "build", "sheet"):
         print(f"contact sheet -> {contact_sheet(out, cfg, args.sheet)}")
     return 0 if ok else 1

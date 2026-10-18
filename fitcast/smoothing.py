@@ -61,6 +61,8 @@ class Smoother:
         self._frozen = np.zeros(33, np.int32)
         self.max_freeze = int(cfg.get("max_freeze_frames", 5))
         self.jump_floor_px = float(cfg.get("max_jump_px_floor", 24))
+        self.sw_ratio_min = float(cfg.get("sw_ratio_min", 0.55))
+        self.sw_ratio_max = float(cfg.get("sw_ratio_max", 1.6))
         self._jump_lim = np.full(33, float(cfg.get("max_jump_sw_limbs", 0.9)), np.float32)
         self._jump_lim[[11, 12, 23, 24]] = float(cfg.get("max_jump_sw", 0.4))       # shoulders, hips
         self._mask_acc: np.ndarray | None = None
@@ -89,15 +91,23 @@ class Smoother:
         # outlier gate: a landmark that jumps farther than a body can move in one frame (torso: `max_jump_sw`,
         # limbs: `max_jump_sw_limbs`, in shoulder widths) keeps its previous position for up to `max_freeze_frames`
         if self._prev_xy is not None and track.shoulder_width > 1.0:
-            lim = np.maximum(self._jump_lim * float(max(track.shoulder_width, track.ref_shoulder_width)), self.jump_floor_px)
+            ref = float(max(track.shoulder_width, track.ref_shoulder_width))
+            lim = np.maximum(self._jump_lim * ref, self.jump_floor_px)
             jump = np.linalg.norm(track.joints[:, :2] - self._prev_xy, axis=1)
             bad = (jump > lim) & (self._frozen < self.max_freeze)
+            # shoulder-width consistency: shoulders collapsing to a point (or exploding) in one frame is a
+            # detector glitch, never a move -> both shoulders keep their previous positions
+            if track.ref_shoulder_width > 1.0:
+                r = float(track.shoulder_width) / float(track.ref_shoulder_width)
+                if (r < self.sw_ratio_min or r > self.sw_ratio_max) and self._frozen[11] < self.max_freeze:
+                    bad[11] = bad[12] = True
             if bad.any():
                 track.joints[bad, :2] = self._prev_xy[bad]
                 self._frozen[bad] += 1
             self._frozen[~bad] = 0
         xy = self.filt(track.joints[:, :2], track.timestamp)
         self._prev_xy = xy.copy()
+        track.shoulder_width = float(np.hypot(*(xy[11] - xy[12])))     # sizing follows the gated, smoothed joints
         if self.predict_s > 0 and self.filt.velocity is not None:
             step = self.filt.velocity * self.predict_s
             np.clip(step, -self.max_predict_px, self.max_predict_px, out=step)

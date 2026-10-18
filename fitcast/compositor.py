@@ -19,6 +19,10 @@ class Compositor:
         self.cfg = cfg
         self.W, self.H = size
         self.gallery_layer: np.ndarray | None = None
+        tcfg = cfg.get('temporal', {})
+        self.temporal_median = bool(tcfg.get('median3', False))
+        self.temporal_alpha = float(tcfg.get('ema_alpha', 1.0))
+        self._t1 = self._t2 = self._ta = self._tb = self._ema = None
         self.head_fill = int(min(max(int(cfg.get('head_fill_level', 0)), 0), 110))  # <= 43% of full white (user-approved)
         self.lit_px = 0
         self.rect_right: list[int] | None = None
@@ -138,6 +142,7 @@ class Compositor:
                 cv2.convertScaleAbs(self._held, dst=out, alpha=self._fade, beta=0)
             else:
                 out.fill(0)
+            self._t1 = None                               # history re-seeds from the first frame after recovery
             return out
 
         # premultiply: colour * alpha * mask  (black = no light)
@@ -146,6 +151,24 @@ class Compositor:
         cv2.merge((self._lit, self._lit, self._lit), dst=self._lit3)
         cv2.multiply(rgba[:, :, :3], self._lit3, dst=out, scale=1.0 / 255.0)
         cv2.LUT(out, self._lut, dst=out)
+        if self.temporal_median:
+            # frame-to-frame guard: per-pixel median of the last three lit frames removes any single-frame
+            # change (a dropout or a one-frame jump) without lagging sustained motion more than one frame ...
+            if self._t1 is None:
+                self._t1, self._t2 = out.copy(), out.copy()
+                self._ta, self._tb, self._ema = np.empty_like(out), np.empty_like(out), out.copy()
+            cv2.min(self._t1, self._t2, dst=self._ta)
+            cv2.max(self._t1, self._t2, dst=self._tb)
+            cv2.min(self._tb, out, dst=self._tb)
+            cv2.max(self._ta, self._tb, dst=self._tb)          # median3(t2, t1, out)
+            np.copyto(self._t2, self._t1)
+            np.copyto(self._t1, out)
+            if self.temporal_alpha < 1.0:
+                # ... and an EMA damps what is left; its weight grows with the change so real moves still pass
+                cv2.addWeighted(self._tb, self.temporal_alpha, self._ema, 1.0 - self.temporal_alpha, 0.0, dst=self._ema)
+                np.copyto(out, self._ema)
+            else:
+                np.copyto(out, self._tb)
 
         if self.gallery_enabled and gallery.visible and gallery.outfits:
             # the gallery lives on the wall: with `gallery_layer` set it is returned separately so the caller can warp
