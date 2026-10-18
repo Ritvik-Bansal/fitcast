@@ -171,6 +171,9 @@ def compute_head_box(joints: np.ndarray, vis: np.ndarray, sw: float, cfg: dict, 
     # Anchoring to the shoulders left the whole neck/collar dark and made every shirt look like it started too low.
     chin = fy1 + cfg["chin_margin_frac"] * sw
     y1 = max(min(chin, sh_y - cfg["bottom_gap_frac"] * sw), fy1 + cfg.get("bottom_min_margin_frac", cfg["min_margin_frac"]) * sw)
+    if float(vis[list(FACE_IDX)].min()) < float(cfg.get("face_vis_floor", 0.5)):
+        # face not seen (back view, synthetic face points): no chin to anchor to, box reaches down to the shoulders
+        y1 = max(y1, sh_y - cfg["bottom_gap_frac"] * sw)
     # union with segmentation evidence above the shoulder line, near the face
     cx = 0.5 * (fx0 + fx1)
     win = cfg["search_window_frac"] * sw
