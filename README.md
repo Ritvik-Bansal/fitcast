@@ -245,3 +245,14 @@ table `assets/shop_links.yaml` (one or two verified retailer pages per garment);
 links are written to `out/last_links.txt`; set `stylist.imessage_to` to a phone number / Apple ID and they are also sent
 with Messages.app. Settings live under `stylist:` in `config.yaml`. The demo itself stays offline; only this feature
 talks to the network.
+
+## Web UI and cart
+
+```
+.venv/bin/python scripts/webapp.py          # http://localhost:8765
+```
+- `/` : paste a product page or image URL. It runs `scripts/garment_from_url.py`, and the running demo reloads its
+  outfits (via `out/reload.now`) so the piece appears in the strips within seconds.
+- `/cart` : the cart list. In the booth, hold both hands above your head for 2.5 s: a ring fills on the wall, then the
+  top and bottoms you are wearing are added to `out/cart.json` with a purchase link each (curated links, else the
+  product page the garment came from, else a shopping search). The page refreshes itself.
