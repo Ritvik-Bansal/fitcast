@@ -53,6 +53,8 @@ class GestureDetector:
         self.max_body_travel = float(cfg.get("max_body_travel_sw", 0.5))
         self.vertical_swipes = bool(cfg.get("vertical_swipes", False))
         self.window_v = float(cfg.get("window_s_vertical", cfg.get("window_s", 0.4)))
+        self.return_grace_s = float(cfg.get("return_grace_s", 2.0))
+        self._last_v: dict = {}
         self._miss_logged = 0.0
         self.hand_for_bottoms = str(cfg.get("hand_for_bottoms", "right"))
         self.min_travel_v = float(cfg.get("min_travel_sw_vertical", 0.9))
@@ -137,12 +139,9 @@ class GestureDetector:
             dx = buf[-1][1] - nx0
             if self.vertical_swipes:
                 # travel = extreme-to-extreme within the window, so a raise that already peaked still counts
-                ys = [b[2] for b in buf]
-                i_min, i_max = int(np.argmin(ys)), int(np.argmax(ys))
-                dy = ys[-1] - ys[0]
-                span = ys[i_max] - ys[i_min]
-                if abs(dy) < 0.5 * span:          # the hand went up and came back: use the dominant direction
-                    dy = span if i_max > i_min else -span
+                ys = np.array([b[2] for b in buf])
+                k = int(np.argmax(np.abs(ys - ys[0])))
+                dy = float(ys[k] - ys[0])          # direction of the first big move away from where the hand started
                 if len(buf) < self.min_samples or dt <= 0.0 or abs(dy) <= self.min_travel_v:
                     continue
                 vel = abs(dy) / dt
@@ -159,7 +158,13 @@ class GestureDetector:
                     buf.clear()                 # both arms moving = not a deliberate swipe
                     continue
                 part = "bottom" if side == self.hand_for_bottoms else "top"
-                event = ("prev" if dy < 0 else "next") + "_" + part      # image y grows downwards: up = prev
+                direction = "prev" if dy < 0 else "next"                 # image y grows downwards: up = prev
+                last_dir, last_t = self._last_v.get(side, ("", -1e9))
+                if last_dir and last_dir != direction and now - last_t < self.return_grace_s:
+                    buf.clear()                                          # the arm coming back after a swipe
+                    continue
+                self._last_v[side] = (direction, now)
+                event = direction + "_" + part
                 self._cooldown_until = now + self.cooldown_s
                 self._clear()
                 if self.log_events:

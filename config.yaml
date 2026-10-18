@@ -170,6 +170,7 @@ gestures:
   vertical_swipes: true     # per-hand vertical swipes: right hand up/down scrolls bottoms, left hand scrolls tops
   hand_for_bottoms: right   # the person's right hand
   window_s_vertical: 0.8    # an arm raise is slower than a flick: look at the last 0.8 s
+  return_grace_s: 2.0       # after a vertical swipe the opposite move of the same hand (the arm returning) is ignored this long
   min_travel_sw_vertical: 0.7
   min_velocity_sw_per_s_vertical: 1.0
   zone_swipes: true         # fallback scheme when vertical_swipes is false: horizontal swipe above/below the waist

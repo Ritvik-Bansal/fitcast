@@ -76,13 +76,16 @@ TOPS: dict[str, dict] = {
         title="ballcap hat Lakers jersey basketball pink roses poms game tickets shoes alstroemeria lilies",
         license="CC BY 2.0", license_url="https://creativecommons.org/licenses/by/2.0/", author="ProFlowers.com",
         crop=(0.215, 0.355, 0.795, 0.965), white=246, bg_dist=0, smooth=True, print_dist=45,
-        print_box=(0.15, 0.08, 0.85, 0.66),
+        print_box=(0.24, 0.13, 0.78, 0.63),
+        erase=[[(0.20, 0.34), (0.31, 0.34), (0.31, 0.52), (0.20, 0.52)],      # sneaker
+               [(0.745, 0.34), (0.80, 0.34), (0.80, 0.52), (0.745, 0.52)]],  # game tickets
         desc="white Los Angeles Lakers #24 (Kobe Bryant) adidas swingman jersey, purple/gold trim (flat-lay; "
              "cropped out of a styled flat-lay with cap, shoes, ball and flowers)"),
     "tee_welders": dict(
         title='File:Pink "Welders" T-Shirt Worn by the Welders - DPLA - b0a00013064a4280e484f55149cb7174 (page 1).jpg',
         back_title='File:Pink "Welders" T-Shirt Worn by the Welders - DPLA - b0a00013064a4280e484f55149cb7174 (page 4).jpg',
-        attribution=MOHIST, bg_dist=45,
+        attribution=MOHIST, bg_dist=45, region=(0.13, 0.0, 0.87, 1.0),
+        back_hints=dict(bg_dist=90),
         desc='hot-pink "the Welders" band tee (St. Louis punk band), front + back photo'),
     "tee_coral_court": dict(
         title="File:Coral Court Motel T-Shirt - DPLA - cd249cf4a00e22c6e6821cb73633bb23 (page 4).jpg",
@@ -104,11 +107,13 @@ TOPS: dict[str, dict] = {
         title="File:Polo Ralph Lauren winter jacket, red and black plaid.jpg", attribution=SHEIE, open_frac=0.012,
         erase=[[(0.413, 0.0), (0.562, 0.0), (0.556, 0.084), (0.548, 0.147), (0.531, 0.191), (0.500, 0.242),
                 (0.482, 0.231), (0.447, 0.182), (0.420, 0.142), (0.411, 0.084)]],
+        region=(0.19, 0.0, 0.84, 0.84),
         desc="red and black buffalo-check flannel shirt jacket"),
     "jacket_denim": dict(
         title="File:Polo Ralph Lauren denim jacket.jpg", attribution=SHEIE, open_frac=0.012,
         erase=[[(0.447, 0.067), (0.580, 0.067), (0.582, 0.129), (0.562, 0.147), (0.547, 0.187), (0.533, 0.233),
                 (0.509, 0.209), (0.487, 0.182), (0.469, 0.164), (0.453, 0.124)]],
+        region=(0.19, 0.01, 0.84, 0.80),
         desc="mid-blue denim trucker jacket with corduroy collar"),
     "polo_freddies": dict(
         title="File:Freddie's Polo Shirt - DPLA - 74c5a614754328992dc0c7ecf5102d2c (page 4).jpg",
