@@ -134,8 +134,8 @@ compositor:
     enabled: true
     rect: [20, 40, 300, 700]   # x0 y0 x1 y1, camera px; set during calibration so it lands on the wall
     thumbs_visible: 5
-    thumb_size: 96
-    current_scale: 1.4
+    thumb_size: 72
+    current_scale: 1.3
     anim_ms: 200
     font_scale: 0.55
     bg_color: [20, 20, 20]
