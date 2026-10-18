@@ -107,3 +107,4 @@ Each milestone: what was run, what was observed.
 - Capability report (info message): semantics `sceneDepth+personSegmentationWithDepth`, 1920x1440 @ 60, measured 60 fps, depth/seg 256x192, JPEG hardware encoder, thermal nominal. Full table in DECISIONS.md.
 - Receiver over USB: 60.0 fps, ~15.5 MB/s, 0 drops / 2710 frames, RTT 1-4 ms, capture->Mac 41-56 ms. Depth 100% valid, median 3.07 m.
 - Vision joints: none detected in the first probe because the phone was hand-held in portrait at arm's length (image sideways); needs the landscape mount at 2-3 m.
+- First on-device joint overlay (phone landscape, hand-held at 0.5 m): Vision joints on eyes/nose/ears/shoulders, ARKit segmentation hugs head/hoodie/hand; 13 visible joints, 3D shoulder at z = 0.48 m. Orientation `.up` confirmed. Next: mount on the projector, person at 2-3 m.

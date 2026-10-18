@@ -24,7 +24,7 @@ Method 2, video (slow-motion video from a second phone, independent of the track
   a) .venv/bin/python scripts/latency_probe.py --method video        # flashes + writes out/flash_log.json
      Film at 240 fps BEFORE starting, framing BOTH the projection and the Mac screen's "FitCast Debug" window
      (it shows the same flashing patch + a frame counter).
-  b) .venv/bin/python scripts/latency_probe.py --method video clip.mov --roi x,y,w,h --ref-roi x,y,w,h \
+  b) .venv/bin/python scripts/latency_probe.py --method video clip.mov --roi x,y,w,h --ref-roi x,y,w,h \\
          --log out/flash_log.json [--video-fps 240]
      --roi = the projection in video pixels, --ref-roi = the Mac-screen patch. The video clock is aligned to the
      log by the FIRST dark->bright transition of the Mac-screen ROI; delay_i = projection_on_i - (log_on_i +
@@ -492,7 +492,7 @@ def run_loopback(cfg: dict, lcfg: dict, args: argparse.Namespace) -> int:
         H, W = frame.shape[:2]
         roi = L.parse_roi(args.roi) if args.roi else L.centre_roi(W, H, float(lcfg["roi_frac"]))
         print(f"camera: {desc}, frames {W}x{H}, ROI {roi}; projector {proj[0]}x{proj[1]} "
-              f"({'second display' if display.second else 'NO second display: main screen'})")
+              f"({'headless' if args.headless else 'second display' if display.second else 'NO second display: main screen'})")
         if not (args.no_aim or args.headless or args.simulate is not None):
             aim(sampler, shower, roi)
         if shower.quit:

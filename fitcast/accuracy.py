@@ -7,11 +7,13 @@ differenced against a frame with the projector dark (`detect_lit_outline`), thin
 lit pixel is matched to the nearest pixel of the truth boundary (`truth_boundary_from_depth`: the contour of
 the depth-based DepthBodyMask captured together with the lit frame). The pixel distance is converted to mm with
 the metric scale at the matched truth point: mm_per_px = depth * 1000 / mean(fx, fy) (`boundary_errors_mm`).
+The script passes the truth mask so the error is signed (inside / outside the body) and measured from where the
+band centre should be, (thickness - 1) / 2 px inside the contour: the projected boundary = the band's outer edge.
 
 The band is drawn inside the mask so all its light falls on the body: a band straddling the silhouette would be
 split by DepthMeshProjector's black depth-gap curtains, its outer half would hit the wall (in the projector
-shadow / at the wrong depth). The thinned band centre sits (thickness - 1) / 2 px inside the truth contour:
-the metric's own floor (sub-pixel for thickness 2; `tests/test_accuracy.py` pins it).
+shadow / at the wrong depth). Integer pixel positions leave a quantisation floor of 0.5 px for an even
+thickness (the thinned line of a 2-px band picks one of its two rows); `tests/test_accuracy.py` pins it.
 
 All functions are pure (no I/O, no globals); camera pixel coordinates are (x, y) with pixel centres at
 integers (OpenCV convention).
@@ -37,7 +39,7 @@ def _mask_u8(mask: np.ndarray) -> np.ndarray:
     m = np.asarray(mask)
     if m.ndim != 2:
         raise ValueError(f"mask must be (H, W), got shape {m.shape}")
-    return np.where(m > 0, 255, 0).astype(np.uint8) if m.dtype != np.uint8 or m.max() not in (0, 255) else m
+    return np.where(m > 0, 255, 0).astype(np.uint8)
 
 
 def boundary_pixels(mask: np.ndarray) -> np.ndarray:
@@ -120,15 +122,22 @@ def detect_lit_outline(frame_lit: np.ndarray, frame_dark: np.ndarray, cfg: dict)
 
 
 def boundary_errors_mm(lit_pts: np.ndarray, truth_pts: np.ndarray, depth_cam: np.ndarray, K_cam: np.ndarray,
-                       max_px: float | None = None) -> np.ndarray:
+                       max_px: float | None = None, inside_mask: np.ndarray | None = None,
+                       offset_px: float = 0.0) -> np.ndarray:
     """Per lit pixel, the distance (mm) to the nearest truth boundary pixel.
 
     lit_pts / truth_pts: (N, 2) / (M, 2) camera px (x, y); depth_cam (H, W) metres at camera resolution
-    (0 / NaN = invalid); K_cam (3, 3) camera-space intrinsics. Pixel distance = exact Euclidean distance
+    (0 / NaN = invalid); K_cam (3, 3) camera-space intrinsics. Pixel distance d = exact Euclidean distance
     transform of the inverted truth-boundary image (DIST_MASK_PRECISE). Metric scale = depth at the NEAREST
     TRUTH pixel (always on the body; a lit pixel that missed the body may sit on the wall or have no depth)
-    * 1000 / mean(fx, fy); when that depth is invalid the lit pixel's own depth is used. Returns (N,) float64;
-    NaN for lit pixels outside the image, without any valid depth, or farther than `max_px` from the truth
+    * 1000 / mean(fx, fy); when that depth is invalid the lit pixel's own depth is used.
+
+    Default: unsigned d * scale. With `inside_mask` (the truth mask, nonzero = body): SIGNED error
+    (s - offset_px) * scale, s = +d for lit pixels on the body, -d outside it; positive = the light landed
+    further inside the body than intended, negative = toward / beyond the silhouette edge. `offset_px` is where
+    the lit centre line should be: (thickness - 1) / 2 for an `outline_image` band.
+
+    Returns (N,) float64; NaN for lit pixels outside the image, without any valid depth, or with d > `max_px`
     (when given: stray light / motion edges, counted as rejected by `summarize`). No truth -> all NaN."""
     lit = np.asarray(lit_pts, np.int64).reshape(-1, 2)
     tru = np.asarray(truth_pts, np.int64).reshape(-1, 2)
@@ -160,8 +169,13 @@ def boundary_errors_mm(lit_pts: np.ndarray, truth_pts: np.ndarray, depth_cam: np
     z = np.where(bad, z_own, z)
     K = np.asarray(K_cam, np.float64)
     f = 0.5 * (K[0, 0] + K[1, 1])
+    if inside_mask is not None:
+        on_body = np.asarray(inside_mask)[ly, lx] > 0
+        e_px = np.where(on_body, d_px, -d_px) - float(offset_px)
+    else:
+        e_px = d_px
     with np.errstate(invalid="ignore"):
-        mm = d_px * z * 1000.0 / f
+        mm = e_px * z * 1000.0 / f
         mm[~(np.isfinite(z) & (z > 0))] = np.nan
         if max_px is not None:
             mm[d_px > float(max_px)] = np.nan
@@ -170,15 +184,18 @@ def boundary_errors_mm(lit_pts: np.ndarray, truth_pts: np.ndarray, depth_cam: np
 
 
 def summarize(errors_mm: np.ndarray) -> dict:
-    """{'mean', 'median', 'p95', 'max', 'n', 'n_rejected'} over the finite errors (mm); NaN entries are
-    counted in n_rejected. Statistics are None when no finite error exists."""
+    """{'mean', 'median', 'p95', 'max', 'bias', 'n', 'n_rejected'} (mm). mean / median / p95 / max are of
+    |error| over the finite entries; bias = mean signed error (equals mean for unsigned input; positive = the
+    light sits inside the body). NaN entries are counted in n_rejected. Statistics are None when no finite
+    error exists."""
     e = np.asarray(errors_mm, np.float64).ravel()
     ok = e[np.isfinite(e)]
     res = {"n": int(ok.size), "n_rejected": int(e.size - ok.size)}
     if ok.size == 0:
-        return {"mean": None, "median": None, "p95": None, "max": None, **res}
-    return {"mean": float(ok.mean()), "median": float(np.median(ok)), "p95": float(np.percentile(ok, 95)),
-            "max": float(ok.max()), **res}
+        return {"mean": None, "median": None, "p95": None, "max": None, "bias": None, **res}
+    a = np.abs(ok)
+    return {"mean": float(a.mean()), "median": float(np.median(a)), "p95": float(np.percentile(a, 95)),
+            "max": float(a.max()), "bias": float(ok.mean()), **res}
 
 
 def annotate(frame: np.ndarray, lit_pts: np.ndarray, truth_pts: np.ndarray, text: str = "") -> np.ndarray:
