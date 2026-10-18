@@ -79,6 +79,7 @@ tracker:
     bottom_min_margin_frac: 0.12  # floor for the bottom margin below the lowest face landmark (sides/top keep min_margin_frac)
     min_margin_frac: 0.25   # spec minimum: never less than this around the face
     use_person_mask: true   # also union the pose person-mask pixels above the shoulders
+    union_cap_frac: 0.9     # person/hair pixels may grow the box at most this many shoulder widths from the face (hands over the head stay out)
     search_window_frac: 0.4    # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
     side_width_floor_frac: 0.7 # in side view size the box/skeleton from at least this fraction of the reference shoulder width
   max_shoulder_px: 320      # wider shoulders = someone at the lens, not in the beam: ignored
@@ -429,6 +430,8 @@ selfcal:                    # self-service calibration (T-pose or key t): discs 
   min_body_discs: 3
   debug_images: 6           # out/selfcal_disc_XX.jpg (lit | difference) for the first discs
   trigger_file: out/calibrate.now   # `touch` this file to start self-calibration remotely (same as key t)
+  max_torso_px: 450         # a bigger torso = someone at the laptop, not in the beam: calibration waits
+  max_shoulder_px: 260
 
 stylist:                    # optional Gemini outfit picker (needs network + a key; the demo is offline without it)
   enabled: false            # or run with --stylist

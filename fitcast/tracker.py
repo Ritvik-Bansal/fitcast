@@ -179,15 +179,19 @@ def compute_head_box(joints: np.ndarray, vis: np.ndarray, sw: float, cfg: dict, 
     win = cfg["search_window_frac"] * sw
     row1 = int(np.clip(sh_y, 0, H))
     cx0, cx1 = int(np.clip(cx - win, 0, W)), int(np.clip(cx + win, 0, W))
+    # the union may grow the box only within a cap around the face: arms raised over the head are person pixels
+    # above the shoulder line too, and without the cap the box swallowed them (and the lit frame went dark)
+    cap = float(cfg.get("union_cap_frac", 0.9)) * sw
+    row0 = int(np.clip(fy0 - cap, 0, H))
     for m in (person_mask, hair_face_mask):
-        if m is None or row1 <= 0 or cx1 <= cx0:
+        if m is None or row1 <= row0 or cx1 <= cx0:
             continue
-        sub = m[:row1, cx0:cx1]
+        sub = m[row0:row1, cx0:cx1]
         ys, xs = np.nonzero(sub)
         if len(ys):
-            x0 = min(x0, cx0 + xs.min() - m_min)
-            x1 = max(x1, cx0 + xs.max() + m_min)
-            y0 = min(y0, ys.min() - m_min)
+            x0 = min(x0, max(cx0 + xs.min() - m_min, cx - cap))
+            x1 = max(x1, min(cx0 + xs.max() + m_min, cx + cap))
+            y0 = min(y0, max(row0 + ys.min() - m_min, fy0 - cap))
     x0, y0 = int(np.clip(np.floor(x0), 0, W)), int(np.clip(np.floor(y0), 0, H))
     x1, y1 = int(np.clip(np.ceil(x1), 0, W)), int(np.clip(np.ceil(y1), 0, H))
     return x0, y0, x1, y1
