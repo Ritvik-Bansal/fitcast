@@ -22,7 +22,7 @@ def test_one_euro_removes_jitter_and_tracks_motion():
 
 
 def test_smoother_predicts_forward_and_clamps(config):
-    cfg = dict(config["smoothing"], predict_ms=100, max_predict_px=5)
+    cfg = dict(config["smoothing"], predict_ms=100, max_predict_px=5, min_cutoff=1.0, beta=0.05)   # the mechanism, not the live tuning
     sm = Smoother(cfg, mask_alpha=1.0)
     tr = make_track(ts=0.0)
     base = tr.joints.copy()
