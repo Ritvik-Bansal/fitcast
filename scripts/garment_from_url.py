@@ -70,7 +70,8 @@ URL_DEFAULTS: dict = {
     "transparent_frac": 0.02,      # an image with at least this share of alpha < 128 is already cut out
     "bottom_aspect": 1.3,          # cut-out height/width at or above this is a bottom when no keyword decides
     "name_max_chars": 28,
-    "dark_gamma": 0.5,             # applied when the cut-out is darker than garments.min_mean_luminance
+    "dark_gamma_min": 0.35,        # strongest lift for garments darker than garments.min_mean_luminance
+    "edge_erode_px": 2,            # alpha erosion at photo resolution: drops background fringe (white halo)
     "first_prefix": 90,            # default output folders are numbered from here
     "pair_min_prefix": 14,         # first real-photo outfit folder
     "pair_max_prefix": 89,         # folders above this are outputs of this script, never partners
@@ -396,12 +397,18 @@ def cut_garment(img: np.ndarray, cfg: dict, ucfg: dict, white: int | None = None
         out = garment_rgba(np.ascontiguousarray(rgba[..., :3]),
                            int(white if white is not None else cfg["white_bg_threshold"]),
                            bg_dist=float(BG_DIST if bg_dist is None else bg_dist))
+        px = int(ucfg["edge_erode_px"])
+        if px > 0:
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * px + 1, 2 * px + 1))
+            out[..., 3] = cv2.erode(out[..., 3], k)
     if gamma is None:
         lum = mean_luminance(out, cfg)
-        gamma = float(ucfg["dark_gamma"]) if lum < float(cfg["min_mean_luminance"]) else 1.0
-        if gamma != 1.0:
-            log.info("dark garment (mean luminance %.0f < %s): gamma %.2f so it shows when projected",
-                     lum, cfg["min_mean_luminance"], gamma)
+        target = float(cfg["min_mean_luminance"])
+        gamma = 1.0
+        if 0 < lum < target:   # solve (lum/255)^g = target/255, capped so blacks do not turn flat grey
+            gamma = max(float(ucfg["dark_gamma_min"]), float(np.log(target / 255.0) / np.log(lum / 255.0)))
+            log.info("dark garment (mean luminance %.0f < %.0f): gamma %.2f so it shows when projected",
+                     lum, target, gamma)
     if gamma != 1.0:
         lut = (255.0 * (np.arange(256) / 255.0) ** gamma).round().astype(np.uint8)
         out = np.dstack([cv2.LUT(np.ascontiguousarray(out[..., :3]), lut), out[..., 3]])
@@ -591,7 +598,7 @@ def write_from_url_outfit(folder: Path, rgba: np.ndarray, part: str, piece: str,
                 out_meta["parts"].append(p)
         out_meta["colors"] = out_meta["colors"] + list(partner_meta.get("colors", []))[-1:]
         (folder / "meta.yaml").write_text(yaml.safe_dump(out_meta, sort_keys=False))
-        return f"{line} bottom<-{partner.name}"
+        return f"{folder.name:<22} parts={','.join(out_meta['parts'])} {line.split('lum ', 1)[-1]} bottom<-{partner.name}"
     from fetch_garments_bottoms import write_pair   # imported lazily: only the bottom path needs it
     if sleeve is not None and sleeve != partner_meta.get("sleeve"):
         log.warning("--sleeve %s ignored: a fetched bottom keeps the sleeve of its top (%s, from %s)",

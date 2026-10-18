@@ -68,3 +68,10 @@ the outfit folder named in the script's PAIRS (sources above).
 | mid-blue denim trucker jacket with corduroy collar | 30_denim_jacket_khakis | [Polo Ralph Lauren denim jacket.jpg](https://commons.wikimedia.org/wiki/File:Polo_Ralph_Lauren_denim_jacket.jpg) | Robert Sheie | [CC BY 2.0](https://creativecommons.org/licenses/by/2.0) |
 | burnt-orange pique polo shirt with small embroidered logo, front + back photo | 31_polo_chinos | [Freddie's Polo Shirt - DPLA - 74c5a614754328992dc0c7ecf5102d2c (page 4).jpg](https://commons.wikimedia.org/wiki/File:Freddie%27s_Polo_Shirt_-_DPLA_-_74c5a614754328992dc0c7ecf5102d2c_(page_4).jpg) | Missouri Historical Society | Public domain |
 | burnt-orange pique polo shirt with small embroidered logo, front + back photo - back view | 31_polo_chinos | [Freddie's Polo Shirt - DPLA - 74c5a614754328992dc0c7ecf5102d2c (page 6).jpg](https://commons.wikimedia.org/wiki/File:Freddie%27s_Polo_Shirt_-_DPLA_-_74c5a614754328992dc0c7ecf5102d2c_(page_6).jpg) | Missouri Historical Society | Public domain |
+
+## From URL
+
+Made by `scripts/garment_from_url.py`. Shop images are the retailer's copyright: local demo use only.
+
+- 2026-10-18: `90_demo_url` top "Rare By Circle Classic Logo" from <https://commons.wikimedia.org/wiki/File:Rare_By_Circle_Classic_Logo_T-Shirt.jpg> (image <https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Rare_By_Circle_Classic_Logo_T-Shirt.jpg/1280px-Rare_By_Circle_Classic_Logo_T-Shirt.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail>); paired with `14_oversized_tee_flares`; Badislavius, CC BY-SA 4.0 (Wikimedia Commons)
+- 2026-10-18: `90_demo_url` top "Rare By Circle Classic Logo" from <https://commons.wikimedia.org/wiki/File:Rare_By_Circle_Classic_Logo_T-Shirt.jpg> (image <https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Rare_By_Circle_Classic_Logo_T-Shirt.jpg/1280px-Rare_By_Circle_Classic_Logo_T-Shirt.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail>); paired with `14_oversized_tee_flares`; Badislavius, CC BY-SA 4.0 (Wikimedia Commons)

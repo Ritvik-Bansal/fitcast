@@ -22,6 +22,7 @@ class Compositor:
         tcfg = cfg.get('temporal', {})
         self.temporal_median = bool(tcfg.get('median3', False))
         self.temporal_alpha = float(tcfg.get('ema_alpha', 1.0))
+        self.temporal_alpha_other = float(tcfg.get('ema_alpha_other', tcfg.get('ema_alpha', 1.0)))
         self._t1 = self._t2 = self._ta = self._tb = self._ema = None
         self.head_fill = int(min(max(int(cfg.get('head_fill_level', 0)), 0), 110))  # <= 43% of full white (user-approved)
         self.lit_px = 0
@@ -163,9 +164,10 @@ class Compositor:
             cv2.max(self._ta, self._tb, dst=self._tb)          # median3(t2, t1, out)
             np.copyto(self._t2, self._t1)
             np.copyto(self._t1, out)
-            if self.temporal_alpha < 1.0:
-                # ... and an EMA damps what is left; its weight grows with the change so real moves still pass
-                cv2.addWeighted(self._tb, self.temporal_alpha, self._ema, 1.0 - self.temporal_alpha, 0.0, dst=self._ema)
+            alpha = self.temporal_alpha if track.facing == "front" else self.temporal_alpha_other
+            if alpha < 1.0:
+                # ... and an EMA damps what is left (heavier when not facing the camera: landmarks are noisier there)
+                cv2.addWeighted(self._tb, alpha, self._ema, 1.0 - alpha, 0.0, dst=self._ema)
                 np.copyto(out, self._ema)
             else:
                 np.copyto(out, self._tb)
