@@ -101,7 +101,7 @@ smoothing:
   max_predict_px: 12
   max_jump_sw: 0.4          # shoulders/hips may move at most this many shoulder widths per frame (else frozen) ...
   max_jump_sw_limbs: 0.9    # ... limbs this much (a swipe is ~0.2 per frame)
-  max_freeze_frames: 5      # after this many frozen frames the new position is accepted (real fast move)
+  max_freeze_frames: 12     # after this many frozen frames the new position is accepted (real fast move)
   max_jump_px_floor: 24     # the per-frame limit is never below this many pixels
   sw_ratio_min: 0.55        # shoulder width below this fraction of the reference in a frame = glitch (shoulders frozen) ...
   sw_ratio_max: 1.6         # ... same above this
@@ -142,6 +142,7 @@ compositor:
   temporal:                 # frame-to-frame smoothing of the lit frame (camera space, before the head fill)
     median3: true           # per-pixel median of the last 3 frames: single-frame changes never reach the projector
     ema_alpha: 0.6          # then blend 60% new / 40% previous (1.0 = off); lower = smoother but laggier
+    ema_alpha_other: 0.35   # weight when facing back / side (noisier landmarks)
   head_fill_level: 0        # flat grey on the head box (0 = black, user preference). Hard cap 110 (43%): never garment pixels
   gallery:
     enabled: true

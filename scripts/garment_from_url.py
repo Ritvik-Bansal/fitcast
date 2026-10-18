@@ -611,13 +611,17 @@ def write_from_url_outfit(folder: Path, rgba: np.ndarray, part: str, piece: str,
     return line
 
 
-def append_source(sources_md: Path, line: str) -> None:
-    """Append `line` at the end of the "## From URL" section of SOURCES.md (section created if absent)."""
+def append_source(sources_md: Path, line: str, key: str | None = None) -> None:
+    """Append `line` at the end of the "## From URL" section of SOURCES.md (section created if absent);
+    earlier lines of that section containing `key` (the folder) are replaced."""
     text = sources_md.read_text() if sources_md.is_file() else "# Garment sources\n"
     lines = text.rstrip("\n").split("\n")
     if SOURCES_HEADING in lines:
         i = lines.index(SOURCES_HEADING) + 1
         while i < len(lines) and not lines[i].startswith("## "):
+            if key and lines[i].startswith("- ") and key in lines[i]:
+                del lines[i]
+                continue
             i += 1
         while i > 0 and not lines[i - 1].strip():
             i -= 1
@@ -683,7 +687,7 @@ def make_outfit_from_url(src: str, cfg: dict, *, part: str = "auto", name: str |
     entry = (f"- {_dt.date.today().isoformat()}: `{rel}` {part} \"{piece}\" from <{shown}>"
              + (f" (image <{source.image_url}>)" if source.page_url and source.image_url != shown else "")
              + f"; paired with `{partner.name}`" + (f"; {credit}" if credit else ""))
-    append_source(Path(sources_md) if sources_md else gdir / "SOURCES.md", entry)
+    append_source(Path(sources_md) if sources_md else gdir / "SOURCES.md", entry, key=f"`{rel}`")
     print(describe(folder, cfg))
     return folder
 

@@ -72,6 +72,5 @@ the outfit folder named in the script's PAIRS (sources above).
 ## From URL
 
 Made by `scripts/garment_from_url.py`. Shop images are the retailer's copyright: local demo use only.
+- 2026-10-18: `90_demo_url` top "Rare By Circle Classic Logo" from <https://commons.wikimedia.org/wiki/File:Rare_By_Circle_Classic_Logo_T-Shirt.jpg> (image <https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Rare_By_Circle_Classic_Logo_T-Shirt.jpg/1280px-Rare_By_Circle_Classic_Logo_T-Shirt.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail>); paired with `14_oversized_tee_flares`; Badislavius, CC BY-SA 4.0 (Wikimedia Commons)
 
-- 2026-10-18: `90_demo_url` top "Rare By Circle Classic Logo" from <https://commons.wikimedia.org/wiki/File:Rare_By_Circle_Classic_Logo_T-Shirt.jpg> (image <https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Rare_By_Circle_Classic_Logo_T-Shirt.jpg/1280px-Rare_By_Circle_Classic_Logo_T-Shirt.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail>); paired with `14_oversized_tee_flares`; Badislavius, CC BY-SA 4.0 (Wikimedia Commons)
-- 2026-10-18: `90_demo_url` top "Rare By Circle Classic Logo" from <https://commons.wikimedia.org/wiki/File:Rare_By_Circle_Classic_Logo_T-Shirt.jpg> (image <https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9f/Rare_By_Circle_Classic_Logo_T-Shirt.jpg/1280px-Rare_By_Circle_Classic_Logo_T-Shirt.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=thumbnail>); paired with `14_oversized_tee_flares`; Badislavius, CC BY-SA 4.0 (Wikimedia Commons)

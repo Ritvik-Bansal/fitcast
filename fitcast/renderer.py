@@ -41,6 +41,8 @@ class Renderer:
             return self.canvas
         j, v = track.joints, track.visibility
         sw = max(track.shoulder_width, 1.0)
+        if track.ref_shoulder_width > 1.0:      # a collapsed detection never shrinks the garments
+            sw = max(sw, float(self.cfg.get('front_min_width_frac', 0.0)) * float(track.ref_shoulder_width))
         if self.vertical_offset_frac:
             j = j.copy()
             j[:, 1] += self.vertical_offset_frac * sw      # live-tunable global nudge (keys [ and ])

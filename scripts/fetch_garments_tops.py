@@ -43,7 +43,8 @@ for p in (ROOT, ROOT / "scripts"):
         sys.path.insert(0, str(p))
 
 from fitcast.garments import composite, garment_cfg  # noqa: E402
-from fetch_garments import (ALLOWED_LICENSES, API, BG_DIST, USER_AGENT, flatten_chroma, garment_rgba,  # noqa: E402
+from fetch_garments import (ALLOWED_LICENSES, API, BG_DIST, SMOOTH_D, SMOOTH_SIGMA_COLOR,  # noqa: E402
+                            SMOOTH_SIGMA_SPACE, USER_AGENT, WORK_MAX_PX, cutout, flatten_chroma, garment_rgba,
                             layout_top, print_mask, torso_region)
 from prepare_garments import _hex, _median_color, load_config, write_outfit  # noqa: E402
 
@@ -229,18 +230,56 @@ def fetch(raw_dir: Path) -> dict[str, dict]:
 
 # ----------------------------------------------------------------------------- build
 
+def cut_photo(bgr: np.ndarray, m: dict, cfg: dict) -> np.ndarray:
+    """fetch_garments.garment_rgba plus `erase`: polygons (normalized full-photo coords) forced transparent
+    after the cut-out, for mannequin neck forms the garment's collar encloses. Returns the tight RGBA crop."""
+    if not m.get("erase"):
+        return garment_rgba(bgr, int(m.get("white", cfg["white_bg_threshold"])), m.get("crop"),
+                            float(m.get("bg_dist", BG_DIST)), float(m.get("gamma", 1.0)),
+                            float(m.get("open_frac", 0.0)), bool(m.get("smooth", False)))
+    h, w = bgr.shape[:2]
+    x0, y0, x1, y1 = m.get("crop") or (0.0, 0.0, 1.0, 1.0)
+    bgr = bgr[round(y0 * h):round(y1 * h), round(x0 * w):round(x1 * w)]
+    s = min(1.0, WORK_MAX_PX / max(bgr.shape[:2]))
+    if s < 1:
+        bgr = cv2.resize(bgr, (round(bgr.shape[1] * s), round(bgr.shape[0] * s)), interpolation=cv2.INTER_AREA)
+    mask = cutout(bgr, int(m.get("white", cfg["white_bg_threshold"])), float(m.get("bg_dist", BG_DIST)),
+                  float(m.get("open_frac", 0.0)))
+    for poly in m["erase"]:
+        pts = np.array([[(px * w - round(x0 * w)) * s, (py * h - round(y0 * h)) * s] for px, py in poly])
+        cv2.fillPoly(mask, [pts.round().astype(np.int32)], 0)
+    mask = _largest_blob(mask)
+    if m.get("smooth"):
+        bgr = cv2.bilateralFilter(bgr, SMOOTH_D, SMOOTH_SIGMA_COLOR, SMOOTH_SIGMA_SPACE)
+    if float(m.get("gamma", 1.0)) != 1.0:
+        lut = (255.0 * (np.arange(256) / 255.0) ** float(m["gamma"])).round().astype(np.uint8)
+        bgr = cv2.LUT(bgr, lut)
+    bx, by, bw, bh = cv2.boundingRect(mask)
+    return np.dstack([bgr[by:by + bh, bx:bx + bw], mask[by:by + bh, bx:bx + bw]])
+
+
+def _largest_blob(mask: np.ndarray) -> np.ndarray:
+    """Keep only the largest connected component (holes stay open, unlike fetch_garments._largest_filled)."""
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    if n <= 1:
+        return mask
+    keep = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return np.where(labels == keep, 255, 0).astype(np.uint8)
+
+
 def _cut(raw_dir: Path, stem: str, m: dict, cfg: dict) -> np.ndarray:
     bgr = cv2.imread(str(raw_dir / f"{stem}.jpg"), cv2.IMREAD_COLOR)
     if bgr is None:
         raise FileNotFoundError(f"{raw_dir / (stem + '.jpg')} missing; run `scripts/fetch_garments_tops.py fetch`")
-    rgba = garment_rgba(bgr, int(m.get("white", cfg["white_bg_threshold"])), m.get("crop"),
-                        float(m.get("bg_dist", BG_DIST)), float(m.get("gamma", 1.0)),
-                        float(m.get("open_frac", 0.0)), bool(m.get("smooth", False)))
-    return layout_top(rgba, cfg)
+    hints = dict(m, **m.get("back_hints", {})) if stem.endswith("_back") else m
+    return layout_top(cut_photo(bgr, hints, cfg), cfg)
 
 
 def load_top(key: str, raw_dir: Path, cfg: dict):
-    """(front canvas, front-only print mask or None, top_body_region, back canvas or None) for a TOPS key."""
+    """(front canvas, front-only print mask or None, top_body_region, back canvas or None) for a TOPS key.
+
+    A real back photo is used when there is one; otherwise the print mask (torso pixels far from the
+    fabric colour, limited to `print_box` when given) tells synthesize_back what to replace with fabric."""
     m = TOPS[key]
     front = _cut(raw_dir, key, m, cfg)
     has_back = (raw_dir / f"{key}_back.jpg").is_file() and (m.get("back_title") or m.get("back_url"))
@@ -248,7 +287,9 @@ def load_top(key: str, raw_dir: Path, cfg: dict):
     region = tuple(m.get("region") or torso_region(front, cfg))
     if m.get("flat_chroma"):
         front = flatten_chroma(front, float(m["print_dist"]))
-    detail = print_mask(front, region, float(m["print_dist"])) if m.get("print_dist") and back is None else None
+    detail = None
+    if m.get("print_dist") and back is None:
+        detail = print_mask(front, tuple(m.get("print_box") or region), float(m["print_dist"]))
     return front, detail, region, back
 
 

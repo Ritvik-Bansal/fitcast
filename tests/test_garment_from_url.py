@@ -204,11 +204,14 @@ def test_top_from_page_builds_loadable_outfit(site, garments, cfg, capsys):
     assert gfu.SOURCES_HEADING in src_md and url in src_md and "90_red_cotton_tee" in src_md
     out = capsys.readouterr().out
     assert "loaded 90_red_cotton_tee" in out and "top_body_region" in out
-    # second run: same slug reuses the folder, SOURCES.md keeps one heading with two lines
+    # second run: same slug reuses the folder; SOURCES.md keeps one heading and one line per folder
     gfu.make_outfit_from_url(url, cfg, garments_dir=garments)
+    gfu.make_outfit_from_url(str(d / "tee.png"), cfg, garments_dir=garments, name="Other Tee")
     text = (garments / "SOURCES.md").read_text()
-    assert text.count(gfu.SOURCES_HEADING) == 1 and text.count(url) == 2
-    assert sorted(p.name for p in garments.iterdir() if p.is_dir()) == ["14_partner", "90_red_cotton_tee"]
+    assert text.count(gfu.SOURCES_HEADING) == 1 and text.count(url) == 1 and "91_other_tee" in text
+    assert text.index("## Bottoms (other)") < text.index(gfu.SOURCES_HEADING)
+    assert sorted(p.name for p in garments.iterdir() if p.is_dir()) == ["14_partner", "90_red_cotton_tee",
+                                                                         "91_other_tee"]
 
 
 def test_bottom_from_file_pairs_existing_top(tmp_path, garments, cfg):
