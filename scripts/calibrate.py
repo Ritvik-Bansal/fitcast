@@ -94,9 +94,21 @@ class LiveRig:
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.cam_size[1])
         self.proj_win, self.dbg_win = disp["projector_window"], disp["debug_window"]
         self.dbg_scale = float(disp["debug_scale"])
+        # same placement as fitcast.display: borderless NSWindow on the projector screen (OpenCV's own
+        # fullscreen only ever covers the MAIN screen on macOS)
+        from fitcast.display import cocoa_place_borderless, detect_displays
         cv2.namedWindow(self.proj_win, cv2.WINDOW_NORMAL)
         cv2.moveWindow(self.proj_win, int(proj_xy[0]), int(proj_xy[1]))
-        cv2.setWindowProperty(self.proj_win, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        cv2.imshow(self.proj_win, np.zeros((int(config["calibration"]["projector_height"]),
+                                           int(config["calibration"]["projector_width"]), 3), np.uint8))
+        cv2.waitKey(1)
+        second = next((d for d in detect_displays() if not d["main"]), None)
+        placed = cocoa_place_borderless(self.proj_win, second["cocoa_index"]) if second else None
+        if placed is None:
+            print("WARNING: no second display / AppKit placement failed; projector window is on the main screen")
+            cv2.setWindowProperty(self.proj_win, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        else:
+            print(f"projector window on '{second['name']}' frame {placed}")
         cv2.namedWindow(self.dbg_win, cv2.WINDOW_AUTOSIZE)   # 1:1 so click coords = image coords
         cv2.setMouseCallback(self.dbg_win, self._on_mouse)
         self.lines: list[str] = []

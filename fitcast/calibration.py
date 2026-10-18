@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 # Keys not (yet) in config.yaml `calibration:`; used only when the config omits them.
 _DEFAULTS = {
+    "min_fill_ratio": 0.6,      # blob area / bbox area; a disc is ~0.785
+    "max_aspect": 2.0,          # bbox aspect ratio limit
+
     "blur_ksize": 5,            # Gaussian blur on the lit-dark difference before thresholding (odd)
     "ransac_reproj_px": 8.0,    # RANSAC inlier threshold, projector px (~5 camera px; manual clicks)
 }
@@ -340,7 +343,19 @@ def detect_markers(frame_lit: np.ndarray, frame_dark: np.ndarray, cfg: dict,
     diff = cv2.GaussianBlur(diff, (k, k), 0)
     _, binary = cv2.threshold(diff, cfg["diff_threshold"], 255, cv2.THRESH_BINARY)
     _, _, stats, cents = cv2.connectedComponentsWithStats(binary, connectivity=8)
-    pts = cents[1:][stats[1:, cv2.CC_STAT_AREA] >= cfg["min_blob_area_px"]]
+    stats, cents = stats[1:], cents[1:]
+    area = stats[:, cv2.CC_STAT_AREA].astype(float)
+    bw, bh = stats[:, cv2.CC_STAT_WIDTH].astype(float), stats[:, cv2.CC_STAT_HEIGHT].astype(float)
+    # projected markers are filled discs: reject thin / sparse blobs (moving people, edges, glare streaks)
+    fill = area / np.maximum(bw * bh, 1.0)
+    aspect = np.maximum(bw, bh) / np.maximum(np.minimum(bw, bh), 1.0)
+    keep = (area >= cfg["min_blob_area_px"]) & (fill >= _opt(cfg, "min_fill_ratio")) & (aspect <= _opt(cfg, "max_aspect"))
+    pts, area = cents[keep], area[keep]
+    if len(pts) > expected:
+        # discs of one grid have similar areas: keep the `expected` blobs nearest the median area
+        med = np.median(area)
+        order = np.argsort(np.abs(area - med), kind="stable")[:expected]
+        pts = pts[np.sort(order)]
     if len(pts) != expected:
         logger.warning("detect_markers: found %d blobs, expected %d. Fix: dim the room, make sure "
                        "the camera sees the whole projection, or tune calibration.diff_threshold "

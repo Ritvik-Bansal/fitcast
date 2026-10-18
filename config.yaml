@@ -149,6 +149,8 @@ calibration:
   settle_frames: 10         # frames to wait after changing the projected pattern
   blur_ksize: 5             # gaussian blur on the lit-minus-dark difference image (odd)
   ransac_reproj_px: 8.0     # RANSAC inlier threshold, projector px (~5 camera px)
+  min_fill_ratio: 0.6       # marker blobs must fill >= this of their bounding box (a disc is 0.785)
+  max_aspect: 2.0           # and be at most this elongated
 
 sizing:
   height_cm: 175            # operator enters this; --height overrides

@@ -29,7 +29,8 @@ def detect_displays() -> list[dict]:
             # Cocoa: origin bottom-left, y up. Convert to top-left, y down (what cv2.moveWindow expects).
             screens.append({"x": int(fr.origin.x), "y": int(main_h - (fr.origin.y + fr.size.height)),
                             "w": int(fr.size.width), "h": int(fr.size.height),
-                            "scale": float(s.backingScaleFactor()), "main": i == 0})
+                            "scale": float(s.backingScaleFactor()), "main": i == 0,
+                            "name": str(s.localizedName()), "cocoa_index": i})
     except Exception as e:  # pragma: no cover
         log.warning("AppKit screen detection unavailable (%s); falling back to system_profiler", e)
         try:
@@ -49,6 +50,32 @@ def detect_displays() -> list[dict]:
     return screens
 
 
+def cocoa_place_borderless(title: str, cocoa_index: int) -> tuple[int, int, int, int] | None:
+    """Make the OpenCV Cocoa window `title` a borderless window covering NSScreen `cocoa_index`, above the
+    menu bar. OpenCV's own WND_PROP_FULLSCREEN uses the MAIN screen's frame, so it never lands on a projector.
+    Returns the resulting window frame (x, y, w, h in Cocoa points) or None when AppKit is unavailable."""
+    try:
+        import AppKit  # type: ignore
+    except Exception:  # pragma: no cover
+        return None
+    app = AppKit.NSApplication.sharedApplication()
+    win = next((w for w in app.windows() if str(w.title()) == title), None)
+    screens = AppKit.NSScreen.screens()
+    if win is None or cocoa_index >= len(screens):
+        return None
+    fr = screens[cocoa_index].frame()
+    win.setStyleMask_(AppKit.NSWindowStyleMaskBorderless)
+    win.setHasShadow_(False)
+    win.setBackgroundColor_(AppKit.NSColor.blackColor())
+    win.setLevel_(AppKit.NSScreenSaverWindowLevel)          # above the menu bar / dock of that display
+    win.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+                               | AppKit.NSWindowCollectionBehaviorStationary)
+    win.setFrame_display_(fr, True)
+    win.orderFrontRegardless()
+    got = win.frame()
+    return int(got.origin.x), int(got.origin.y), int(got.size.width), int(got.size.height)
+
+
 class Display:
     """Owns the two OpenCV windows. Must be used from the main thread (macOS Cocoa requirement)."""
 
@@ -62,11 +89,14 @@ class Display:
         self.fullscreen = False
         self.debug_open = False
         self.proj_open = False
+        self.second: dict | None = None
         self.origin = self._resolve_origin(projector_xy)
+        self._black = np.zeros((self.ph, self.pw, 3), np.uint8)
 
     def _resolve_origin(self, override: tuple[int | None, int | None]) -> tuple[int, int]:
         screens = detect_displays() if not self.headless else []
         second = next((s for s in screens if not s["main"]), None)
+        self.second = second
         if second is None and screens:
             log.warning("Only one display detected. Connect the projector over HDMI as an EXTENDED display "
                         "(System Settings > Displays, not mirrored). Using the main display for now.")
@@ -90,8 +120,21 @@ class Display:
         if self.headless or not self.proj_open:
             return
         cv2.moveWindow(self.proj_name, *self.origin)
-        cv2.setWindowProperty(self.proj_name, cv2.WND_PROP_FULLSCREEN,
-                              cv2.WINDOW_FULLSCREEN if on else cv2.WINDOW_NORMAL)
+        if on:
+            cv2.imshow(self.proj_name, self._black)      # realise the NSWindow before touching it
+            cv2.waitKey(1)
+            placed = None
+            if self.second is not None and "cocoa_index" in self.second:
+                placed = cocoa_place_borderless(self.proj_name, self.second["cocoa_index"])
+            if placed is not None:
+                log.info("projector window placed borderless on '%s' at cocoa frame %s",
+                         self.second.get("name", "?"), placed)
+            else:
+                log.warning("AppKit placement unavailable; falling back to OpenCV fullscreen (main screen only)")
+                cv2.setWindowProperty(self.proj_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        else:
+            cv2.setWindowProperty(self.proj_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(self.proj_name, self.pw, self.ph)
         self.fullscreen = on
 
     def toggle_fullscreen(self) -> None:
