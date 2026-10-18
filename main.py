@@ -150,12 +150,24 @@ class App:
                             "--demo", "--config", args.config], check=True)
             outfits = load_outfits(cfg["garments"])
         self.gallery = GalleryState(outfits=outfits, index=args.outfit % len(outfits), prev_index=args.outfit % len(outfits))
+        gcfg = cfg["compositor"]["gallery"]
+        hide_t = set(gcfg.get("hide_tops") or []); hide_b = set(gcfg.get("hide_bottoms") or [])
         seen: set = set()
         for i, o in enumerate(outfits):            # bottom swipes cycle distinct bottoms only (many demo outfits share "Jeans")
             key = o.name.split(" + ")[-1] if o.bottom_front is not None else None
-            if key is not None and key not in seen:
+            if key is not None and key not in seen and key not in hide_b:
                 seen.add(key)
                 self.gallery.bottom_cycle.append(i)
+        seen_t: set = set()
+        for i, o in enumerate(outfits):            # tops strip / swipes: distinct, not hidden (drawn garments are hidden)
+            key = o.name.split(" + ")[0] if o.top_front is not None else None
+            if key is not None and key not in seen_t and key not in hide_t:
+                seen_t.add(key)
+                self.gallery.top_cycle.append(i)
+        if self.gallery.top_cycle and self.gallery.index not in self.gallery.top_cycle:
+            self.gallery.index = self.gallery.prev_index = self.gallery.top_cycle[0]
+        if self.gallery.bottom_cycle and self.gallery.outfits[self.gallery.index].name.split(" + ")[-1] in hide_b:
+            self.gallery.bottom_index = self.gallery.bottom_cycle[0]
         log.info("%d outfits loaded: %s", len(outfits), ", ".join(o.id for o in outfits))
         proj = (int(cfg["calibration"]["projector_width"]), int(cfg["calibration"]["projector_height"]))
         self.display = Display(cfg["display"], proj, (args.projector_x, args.projector_y), headless=args.no_window)
@@ -191,7 +203,8 @@ class App:
             from fitcast.stylist import GeminiStylist, Recorder, load_api_key
             key = load_api_key(scfg)
             if key:
-                self.stylist = GeminiStylist(scfg, outfits, key)
+                self.stylist = GeminiStylist({**scfg, "hide_tops": cfg["compositor"]["gallery"].get("hide_tops") or [],
+                                              "hide_bottoms": cfg["compositor"]["gallery"].get("hide_bottoms") or []}, outfits, key)
                 self.recorder = Recorder(scfg)
                 log.info("stylist on: press %s to talk (again to send) or write a question to %s",
                          scfg.get("record_key", "v"), scfg.get("ask_file", "out/ask.txt"))
@@ -255,7 +268,9 @@ class App:
     def set_outfit(self, idx: int, now: float) -> None:
         """Whole outfit (keys / auto-cycle): bottoms follow the top again."""
         g = self.gallery
-        g.prev_index, g.index = g.index, idx % len(g.outfits)
+        cyc = g.top_cycle or list(range(len(g.outfits)))
+        pos = cyc.index(g.index) if g.index in cyc else 0
+        g.prev_index, g.index = g.index, cyc[(pos + (1 if idx > g.index else -1)) % len(cyc)]
         g.bottom_index, g.strip, g.changed_at = -1, "outfits", now
         log.info("outfit -> %s", g.current.name)
 
@@ -264,7 +279,10 @@ class App:
         g = self.gallery
         if g.bottom_index < 0:
             g.bottom_index = g.index
-        g.prev_index, g.index = g.index, idx % len(g.outfits)
+        cyc = g.top_cycle or list(range(len(g.outfits)))
+        pos = cyc.index(g.index) if g.index in cyc else 0
+        step = 1 if idx > g.index else -1
+        g.prev_index, g.index = g.index, cyc[(pos + step) % len(cyc)]
         g.strip, g.changed_at = "tops", now
         log.info("top -> %s", g.current.name)
 

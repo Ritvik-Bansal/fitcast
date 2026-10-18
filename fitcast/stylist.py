@@ -84,12 +84,19 @@ class GeminiStylist:
         self._busy = threading.Event()
         self.links = load_shop_links(cfg.get("links_file", "assets/shop_links.yaml"))
         # tops: every outfit with a top; bottoms: first outfit per distinct bottom name (the demo pairs repeat "Jeans")
-        self.top_ids = [i for i, o in enumerate(outfits) if o.top_front is not None]
+        hide_t, hide_b = set(cfg.get("hide_tops") or []), set(cfg.get("hide_bottoms") or [])
+        seen_t: set[str] = set()
+        self.top_ids = []
+        for i, o in enumerate(outfits):
+            name = _top_name(o)
+            if o.top_front is not None and name not in seen_t and name not in hide_t:
+                seen_t.add(name)
+                self.top_ids.append(i)
         seen: set[str] = set()
         self.bottom_ids = []
         for i, o in enumerate(outfits):
             name = _bottom_name(o)
-            if o.bottom_front is not None and name not in seen:
+            if o.bottom_front is not None and name not in seen and name not in hide_b:
                 seen.add(name)
                 self.bottom_ids.append(i)
 

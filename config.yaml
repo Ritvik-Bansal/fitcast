@@ -142,9 +142,11 @@ compositor:
   temporal:                 # frame-to-frame smoothing of the lit frame (camera space, before the head fill)
     median3: true           # per-pixel median of the last 3 frames: single-frame changes never reach the projector
     ema_alpha: 0.6          # then blend 60% new / 40% previous (1.0 = off); lower = smoother but laggier
-  head_fill_level: 90       # flat grey on the head box (0 = black). Hard cap 110 (43%): never garment pixels
+  head_fill_level: 0        # flat grey on the head box (0 = black, user preference). Hard cap 110 (43%): never garment pixels
   gallery:
     enabled: true
+    hide_tops: ["Heather Hoodie", "Basketball Jersey"]        # drawn parts inside otherwise real outfits
+    hide_bottoms: ["Cargo Pants", "Chinos", "Sweatpants"]
     rect: [20, 40, 300, 700]   # x0 y0 x1 y1, camera px; set during calibration so it lands on the wall
     thumbs_visible: 5
     thumb_size: 72
@@ -269,6 +271,7 @@ logging:
 
 garments:
   dir: assets/garments
+  exclude_prefixes: ["01_", "02_", "03_", "04_", "05_", "06_", "07_", "08_", "09_", "10_", "11_", "12_", "13_", "19_"]   # drawn demo outfits: real photos only
   saturation_boost: 1.35    # projected color on white fabric washes out; assets are made punchier than source
   brightness_boost: 1.15
   min_mean_luminance: 70    # warn below this (0-255); near-black garments do not project

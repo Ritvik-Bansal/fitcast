@@ -212,7 +212,10 @@ def load_outfits(cfg: dict, garments_dir: str | None = None) -> list[Outfit]:
     if not d.is_dir():
         raise RuntimeError(f"garments dir {d} does not exist; {fix}")
     outfits = []
+    excl = tuple(str(x) for x in (cfg.get("exclude_prefixes") or [])) if garments_dir is None else ()   # live dir only
     for folder in sorted(p for p in d.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
+        if excl and folder.name.startswith(excl):
+            continue
         try:
             outfits.append(load_outfit(folder, cfg))
         except (OSError, ValueError, TypeError, cv2.error) as e:

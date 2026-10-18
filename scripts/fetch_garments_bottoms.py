@@ -37,7 +37,8 @@ for p in (ROOT, ROOT / "scripts"):
         sys.path.insert(0, str(p))
 
 from fitcast.garments import composite, garment_cfg, load_outfit  # noqa: E402
-from fetch_garments import ALLOWED_LICENSES, BG_DIST, _get, commons_info, garment_rgba, layout_bottom  # noqa: E402
+from fetch_garments import (ALLOWED_LICENSES, BG_DIST, MARGIN_FRAC, _get, commons_info, feather,  # noqa: E402
+                            garment_rgba, layout_bottom)
 from prepare_garments import _hex, _median_color, load_config, write_outfit  # noqa: E402
 
 log = logging.getLogger("fitcast.fetch_garments_bottoms")
@@ -46,6 +47,13 @@ RAW_SUBDIR = "_raw_bottoms"
 DOWNLOAD_PAUSE_S = 1.5      # between downloads (Commons answers 429 to bursts)
 SOURCES_HEADING = "## Bottoms (scripts/fetch_garments_bottoms.py)"
 SHEET_ROW_H = 384           # contact sheet row height (px)
+# leg rectification (straightens angled / bent legs into vertical columns, see rectify_bottom)
+RECT_MIN_SPAN_FRAC = 0.5    # rows narrower than this fraction of the median leg width are magnified at most 1/this
+RECT_SPECK_FRAC = 0.04      # opaque runs shorter than this fraction of the half width are specks (ignored)
+RECT_CROTCH_GAP_FRAC = 0.01 # a row is "split" when this fraction of the width around the centre line is transparent
+RECT_CROTCH_SPLIT_RUN = 0.9 # crotch = first row below which at least this fraction of the garment rows are split
+RECT_CROTCH_FALLBACK = 0.30 # crotch row (fraction of the garment height) when the legs never separate
+RECT_EDGE_SMOOTH_ROWS = 9   # running median over rows applied to the span edges (kills jagged outlines)
 
 NM_CREDIT = "Nordiska museet"
 
@@ -137,6 +145,112 @@ def fetch(raw_dir: Path) -> dict[str, dict]:
     return sources
 
 
+# ----------------------------------------------------------------------------- rectify
+
+def _row_span(row: np.ndarray, min_run: int) -> tuple[int, int] | None:
+    """[x0, x1) from the first to the last opaque run of at least `min_run` px (shorter runs = specks)."""
+    d = np.diff(np.concatenate([[0], row.astype(np.int8), [0]]))
+    starts, ends = np.flatnonzero(d == 1), np.flatnonzero(d == -1)
+    keep = (ends - starts) >= min_run
+    if not keep.any():
+        return None
+    return int(starts[keep][0]), int(ends[keep][-1])
+
+
+def _spans(alpha: np.ndarray, min_run: int) -> np.ndarray:
+    """(H, 2) float span edges per row (NaN where the row is empty), running-median smoothed over rows."""
+    out = np.full((alpha.shape[0], 2), np.nan, np.float32)
+    for y, row in enumerate(alpha):
+        sp = _row_span(row, min_run)
+        if sp is not None:
+            out[y] = sp
+    k = RECT_EDGE_SMOOTH_ROWS // 2
+    valid = np.flatnonzero(~np.isnan(out[:, 0]))
+    sm = out.copy()
+    for y in valid:
+        win = out[max(0, y - k):y + k + 1]
+        sm[y] = np.nanmedian(win, axis=0)
+    return sm
+
+
+def _crotch_row(alpha: np.ndarray, y0: int, y1: int) -> int:
+    """First garment row from which the centre line stays (mostly) transparent down to the hems."""
+    h, w = alpha.shape
+    g = max(1, round(RECT_CROTCH_GAP_FRAC * w))
+    split = ~alpha[:, w // 2 - g:w // 2 + g].any(axis=1)
+    for y in range(y0, y1):
+        if split[y] and split[y:y1].mean() >= RECT_CROTCH_SPLIT_RUN:
+            return y
+    return y0 + round(RECT_CROTCH_FALLBACK * (y1 - y0))
+
+
+def _resample_rows(src: np.ndarray, spans: np.ndarray, rows: range, width_of, centre: float,
+                   out: np.ndarray) -> None:
+    """Resample each row's [x0, x1) span of `src` to `width_of(span)` px centred on `centre` in `out`."""
+    for y in rows:
+        x0, x1 = spans[y]
+        if np.isnan(x0) or x1 - x0 < 1:
+            continue
+        x0, x1 = int(round(x0)), max(int(round(x1)), int(round(x0)) + 1)
+        tw = max(1, int(round(width_of(x1 - x0))))
+        seg = cv2.resize(src[y:y + 1, x0:x1], (tw, 1), interpolation=cv2.INTER_LINEAR)
+        ox = int(round(centre - tw / 2))
+        a, b = max(0, ox), min(out.shape[1], ox + tw)
+        out[y, a:b] = seg[0, a - ox:b - ox]
+
+
+def rectify_bottom(canvas: np.ndarray) -> np.ndarray:
+    """Straighten a laid-out bottoms canvas (output of fetch_garments.layout_bottom): below the crotch each
+    leg half's per-row fabric span is resampled into a fixed-width vertical column (the leg's median span,
+    centred in its half) and stretched down so its hem reaches the bottom margin; above the crotch the
+    waist/hip block is resampled the same way as one piece across both halves. Same size as the input."""
+    h, w = canvas.shape[:2]
+    alpha = canvas[..., 3] > 127
+    rows = np.flatnonzero(alpha.any(axis=1))
+    if rows.size == 0:
+        return canvas
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    my = max(1, round(MARGIN_FRAC * h))
+    half = w // 2
+    min_run = max(2, round(RECT_SPECK_FRAC * half))
+    cy = _crotch_row(alpha, y0, y1)
+    out = np.zeros_like(canvas)
+    # legs: each half becomes a straight vertical column of its median width, centred in the half
+    extent = []
+    for xs in (slice(0, half), slice(half, w)):
+        sub = canvas[:, xs]
+        spans = np.full((h, 2), np.nan, np.float32)
+        spans[cy:] = _spans(sub[cy:, :, 3] > 127, min_run)
+        leg_rows = np.flatnonzero(~np.isnan(spans[:, 0]))
+        if leg_rows.size == 0:
+            continue
+        leg_w = float(np.nanmedian(spans[leg_rows, 1] - spans[leg_rows, 0]))
+        centre = sub.shape[1] / 2.0
+        extent += [xs.start + centre - leg_w / 2, xs.start + centre + leg_w / 2]
+        col = np.zeros_like(sub)
+        _resample_rows(sub, spans, range(cy, h), lambda s, lw=leg_w: lw if s >= RECT_MIN_SPAN_FRAC * lw
+                       else s / RECT_MIN_SPAN_FRAC, centre, col)
+        # hem to the bottom margin: stretch the leg rows [cy, last) over [cy, h - my)
+        last = int(leg_rows[-1]) + 1
+        if h - my > cy and last > cy:
+            col[cy:h - my] = cv2.resize(col[cy:last], (col.shape[1], h - my - cy), interpolation=cv2.INTER_LINEAR)
+            col[h - my:] = 0
+        dst = out[:, xs]
+        m = col[cy:, :, 3] > 0
+        dst[cy:][m] = col[cy:][m]
+    # waist / hip block, one piece across both halves, exactly as wide as the outer edges of the two legs
+    # (no step at the crotch); without legs it keeps its own median width
+    hip = _spans(alpha[:cy], min_run)
+    if cy > y0 and not np.isnan(hip[y0:cy, 0]).all():
+        if extent:
+            hip_w, hip_c = max(extent) - min(extent), 0.5 * (max(extent) + min(extent))
+        else:
+            hip_w, hip_c = float(np.nanmedian(hip[y0:cy, 1] - hip[y0:cy, 0])), w / 2.0
+        _resample_rows(canvas, hip, range(y0, cy), lambda s: hip_w if s >= RECT_MIN_SPAN_FRAC * hip_w
+                       else s / RECT_MIN_SPAN_FRAC, hip_c, out)
+    return feather(out)
+
+
 # ----------------------------------------------------------------------------- build
 
 def _photo(raw_dir: Path, name: str, m: dict, cfg: dict) -> np.ndarray:
@@ -151,12 +265,13 @@ def _photo(raw_dir: Path, name: str, m: dict, cfg: dict) -> np.ndarray:
 def load_bottom(key: str, raw_dir: Path, cfg: dict) -> tuple[np.ndarray, np.ndarray | None]:
     """(front canvas, back canvas or None) laid out over `bottom_size`."""
     m = MANIFEST[key]
-    front = layout_bottom(_photo(raw_dir, key, m, cfg), cfg)
+    front = rectify_bottom(layout_bottom(_photo(raw_dir, key, m, cfg), cfg))
     back = None
     if m.get("back_title"):
         # used as-is: the renderer maps bottoms in image space (image-left half -> image-left leg) and a
         # back photo already shows the person's left leg on the image left, as seen from behind.
-        back = layout_bottom(_photo(raw_dir, f"{key}_back", dict(m, **m.get("back_hints", {})), cfg), cfg)
+        back = rectify_bottom(layout_bottom(_photo(raw_dir, f"{key}_back", dict(m, **m.get("back_hints", {})), cfg),
+                                            cfg))
     return front, back
 
 

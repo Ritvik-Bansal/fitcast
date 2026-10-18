@@ -232,7 +232,12 @@ class Compositor:
         panel = out[y0:y1, x0:x1]
         panel[:] = g["bg_color"]
         pw, ph = x1 - x0, y1 - y0
-        items = gal.bottom_cycle if (strip == "bottoms" and gal.bottom_cycle) else list(range(len(gal.outfits)))
+        if strip == "bottoms" and gal.bottom_cycle:
+            items = gal.bottom_cycle
+        elif strip != "bottoms" and gal.top_cycle:
+            items = gal.top_cycle
+        else:
+            items = list(range(len(gal.outfits)))
         n = len(items)
         ts, scale = int(g["thumb_size"]), float(g["current_scale"])
         big = int(ts * scale)
@@ -248,6 +253,9 @@ class Compositor:
         else:
             cur = gal.index
             prev = gal.prev_index if gal.strip != "bottoms" else cur
+            if gal.top_cycle:
+                cur = items.index(cur) if cur in items else 0
+                prev = items.index(prev) if prev in items else cur
         t = _ease((now - gal.changed_at) / (float(g["anim_ms"]) / 1000.0)) if g["anim_ms"] > 0 else 1.0
         d = cur - prev
         if abs(d) > n / 2:  # wrap-around: take the short way

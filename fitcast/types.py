@@ -71,6 +71,7 @@ class GalleryState:
     bottom_index: int = -1              # -1 = bottoms follow `index` (whole outfit); else mix-and-match
     strip: str = "outfits"              # wall strip shows "outfits" | "tops" | "bottoms"
     bottom_cycle: list = field(default_factory=list)   # outfit indices with distinct bottoms (bottom swipes step through these)
+    top_cycle: list = field(default_factory=list)      # outfit indices whose top is shown (hidden tops skipped)
     _mix: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
