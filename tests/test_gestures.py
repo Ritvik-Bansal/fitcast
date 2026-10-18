@@ -222,6 +222,7 @@ def test_zone_swipes_tag_top_and_bottom():
     from fitcast.gestures import GestureDetector as Gestures
     cfg = dict(yaml.safe_load(open("config.yaml"))["gestures"])
     cfg["zone_swipes"] = True
+    cfg["vertical_swipes"] = False      # this test covers the horizontal zone scheme
     for wrist_dy, suffix in ((0.3, "_top"), (1.0, "_bottom")):      # shoulder-width units below the shoulder line (hips at 1.1)
         g = Gestures(cfg)
         events = []
