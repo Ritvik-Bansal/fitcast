@@ -90,13 +90,13 @@ tracker:
     face_vis_back_threshold: 0.0   # weak "back" hint from face visibility: off (MediaPipe reports ~1.0 from behind; Vision confidences drop with distance)
 
 smoothing:
-  min_cutoff: 1.0
-  beta: 0.05
+  min_cutoff: 0.6           # lower = steadier at rest (One Euro)
+  beta: 0.02                # lower = less speed-adaptive (less jitter during slow moves)
   d_cutoff: 1.0
-  predict_ms: 50            # initial prediction horizon
+  predict_ms: 30            # initial prediction horizon
   predict_auto: true        # replace it with the measured capture->display latency (EMA, clamped)
-  predict_max_ms: 120
-  max_predict_px: 40
+  predict_max_ms: 40        # short horizon: velocity noise x horizon is what made garments jitter
+  max_predict_px: 12
 
 renderer:
   torso_margin_frac: 0.12   # expand torso quad outward, fraction of shoulder width
