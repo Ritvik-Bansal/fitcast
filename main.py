@@ -58,6 +58,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--no-realtime", action="store_true", help="video files: do not pace to native fps")
     ap.add_argument("--no-roi", action="store_true", help="track the whole camera frame, not just the projector footprint")
     ap.add_argument("--show-skeleton", action="store_true", help="also project the tracked skeleton (key k toggles)")
+    ap.add_argument("--sensor", choices=["webcam", "iphone"], help="webcam (default) or the iPhone LiDAR sensor app")
+    ap.add_argument("--sensor-host", help="iphone sensor: connect to this IP instead of USB (usbmux)")
+    ap.add_argument("--calibration3d", help="calibration3d.yaml for depth-correct rendering (default: config)")
     ap.add_argument("--loop", action="store_true", help="headless: keep looping the video file (soak tests)")
     ap.add_argument("--log-level", default=None)
     return ap.parse_args(argv)
@@ -80,7 +83,19 @@ class App:
         if args.no_window and not args.loop:
             cap_cfg["video_loop"] = False          # headless review runs process the file exactly once
         self.size = (int(cap_cfg["width"]), int(cap_cfg["height"]))
-        self.source = FrameSource(cap_cfg, args.source, sync=args.no_window)
+        self.sensor_kind = args.sensor or cfg["sensor"].get("kind", "webcam")
+        self.depth_mask = None
+        self.proj3d = None
+        self._bg_depth: list = []
+        self._bg_conf: list = []
+        if self.sensor_kind == "iphone":
+            from fitcast.sensors.iphone import IPhoneSensor
+            scfg = dict(cfg["sensor"])
+            if args.sensor_host:
+                scfg["usbmux"], scfg["host"] = False, args.sensor_host
+            self.source = IPhoneSensor(scfg, self.size, tracker_cfg=cfg["tracker"])
+        else:
+            self.source = FrameSource(cap_cfg, args.source, sync=args.no_window)
         tcfg = dict(cfg["tracker"])
         if args.backend:
             tcfg["backend"] = args.backend
@@ -91,10 +106,25 @@ class App:
         self.renderer = Renderer(cfg["renderer"], self.size, tcfg["min_visibility"])
         self.compositor = Compositor(cfg["compositor"], self.size)
         self.calib = Calibration(cfg["calibration"], self.size)
-        self.calib.load(args.calibration, allow_simulated=self.source.is_file)   # a fake homography is fine for clips, never live
+        is_file = getattr(self.source, "is_file", False)
+        self.calib.load(args.calibration, allow_simulated=is_file)   # a fake homography is fine for clips, never live
+        if self.sensor_kind == "iphone":
+            from fitcast.depthmask import DepthBodyMask
+            self.depth_mask = DepthBodyMask(cfg["depthmask"], self.size, self.size)   # depth arrives resampled to camera res
+            from pathlib import Path as _P
+            c3d_path = args.calibration3d or cfg["calibration3d"]["file"]
+            if _P(c3d_path).exists():
+                from fitcast.calib3d import load_calibration3d
+                self.calib3d = load_calibration3d(c3d_path)
+                log.info("3D calibration %s loaded (reproj %.2f px, %d points)", c3d_path,
+                         self.calib3d.reproj_error_px, self.calib3d.n_points)
+            else:
+                self.calib3d = None
+                log.warning("no %s: depth-correct rendering disabled, falling back to the 2D homography. "
+                            "Run scripts/calibrate3d.py --sensor iphone.", c3d_path)
         if self.calib.ok and getattr(self.calib.data, "gallery_rect", None):
             self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
-        if self.calib.ok and tcfg.get("roi_from_calibration", True) and not args.no_roi:
+        if self.calib.ok and tcfg.get("roi_from_calibration", True) and not args.no_roi and self.sensor_kind != "iphone":
             # only track inside the projector footprint (+margin): bystanders beside the rig are ignored
             c = self.calib.unproject_points(np.array([[0, 0], [self.calib.projector_size[0], 0],
                                                       list(self.calib.projector_size), [0, self.calib.projector_size[1]]], float))
@@ -173,6 +203,8 @@ class App:
             self.sizing.reset()
         elif k == ord("g"):
             self.gallery.visible = not self.gallery.visible
+        elif k == ord("b"):
+            self.relearn_background()
         elif k == ord("k"):
             self.show_skeleton = not self.show_skeleton
             log.info("skeleton on projector: %s", self.show_skeleton)
@@ -209,8 +241,14 @@ class App:
             while running:
                 item = self.source.read()
                 if item is None or item[2] == last_seq:
-                    if a.no_window:
+                    if a.no_window and self.sensor_kind != "iphone":
                         break
+                    if a.no_window:                      # headless sensor run: wait for the next frame
+                        time.sleep(0.002)
+                        if time.perf_counter() - t_start > self.stall_exit_s and item is None:
+                            log.error("no sensor frames within %.0f s", self.stall_exit_s)
+                            break
+                        continue
                     now = time.perf_counter()
                     age = now - (item[1] if item is not None else t_start)
                     if age > self.stale_s:
@@ -254,9 +292,48 @@ class App:
         self.report(time.perf_counter() - t_start)
         return 0
 
+    def _step_sensor_track(self, frame: np.ndarray, ts: float):
+        """iPhone path: phone joints + depth-based person mask -> tracker's mask/head/facing logic."""
+        st = self.source.track()
+        if st is None or not st.ok:
+            return self.tracker.process_external(frame, ts, np.zeros((33, 3), np.float32), np.zeros((33,), np.float32), None)
+        person = None
+        if self.depth_mask is not None and st.depth is not None:
+            conf = self.source.last_conf
+            if conf is None:
+                conf = np.full(st.depth.shape, 2, np.uint8)
+            if not self.depth_mask.ready:
+                # learn the empty-scene background from the first N frames (operator stays out of the beam)
+                self._bg_depth.append(st.depth.copy()); self._bg_conf.append(conf.copy())
+                need = int(self.cfg["depthmask"]["background_frames"])
+                if len(self._bg_depth) >= need:
+                    if st.K_cam is not None:
+                        self.depth_mask.set_intrinsics(st.K_cam)
+                    self.depth_mask.learn_background(self._bg_depth, self._bg_conf)
+                    self._bg_depth.clear(); self._bg_conf.clear()
+                    log.info("depth background learned (%d frames); person may step in", need)
+            else:
+                if st.K_cam is not None:
+                    self.depth_mask.set_intrinsics(st.K_cam)
+                person = self.depth_mask.compute(st.depth, conf, frame, person_seg=self.source.last_seg)
+        track = self.tracker.process_external(frame, ts, st.joints, st.visibility, person)
+        track.depth, track.joints3d, track.K_cam = st.depth, st.joints3d, st.K_cam
+        return track
+
+    def relearn_background(self) -> None:
+        """Key b: forget the depth background and learn it again from the next N frames (step out of the beam)."""
+        if self.depth_mask is not None:
+            self._bg_depth.clear(); self._bg_conf.clear()
+            from fitcast.depthmask import DepthBodyMask
+            self.depth_mask = DepthBodyMask(self.cfg["depthmask"], self.size, self.size)
+            log.info("relearning the depth background: step out of the beam")
+
     def step(self, frame: np.ndarray, ts: float, now: float) -> None:
         t0 = time.perf_counter()
-        track = self.tracker.process(frame, ts)
+        if self.sensor_kind == "iphone":
+            track = self._step_sensor_track(frame, ts)
+        else:
+            track = self.tracker.process(frame, ts)
         track = self.smoother.update(track)
         for ev in self.gestures.update(track):
             self.gesture_log.append((now, ev))
@@ -284,7 +361,17 @@ class App:
             self._torso_ema = t_px if self._torso_ema is None else 0.8 * self._torso_ema + 0.2 * t_px
         shift = self.calib.depth_shift(self._torso_ema)
         self.depth_shift = shift
-        proj = self.calib.to_projector(comp, shift)
+        if self.sensor_kind == "iphone" and getattr(self, "calib3d", None) is not None and track.depth is not None:
+            if self.proj3d is None:
+                from fitcast.render3d import DepthMeshProjector
+                c = self.calib3d
+                self.proj3d = DepthMeshProjector(self.cfg["render3d"], self.size, tuple(c.proj_size),
+                                                 np.asarray(track.K_cam if track.K_cam is not None else c.K_cam),
+                                                 np.asarray(c.K_p), np.asarray(c.dist_p), np.asarray(c.R), np.asarray(c.t))
+                log.info("depth-correct GPU projection active")
+            proj = self.proj3d.render(comp, track.depth)
+        else:
+            proj = self.calib.to_projector(comp, shift)
         t2 = time.perf_counter()
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)
@@ -304,7 +391,10 @@ class App:
                     "fallback": self.tracker.fallback_active, "outfit": self.gallery.current.name,
                     "calib": (f"ok {self.calib.data.reproj_error_px:.1f}px depth({self.depth_shift[0]:+.0f},{self.depth_shift[1]:+.0f})"
                               if self.calib.ok else "MISSING"),
-                    "extra": f"frame {self.frames}"}
+                    "extra": f"frame {self.frames}" + (
+                        f"  sensor {self.source.stats.get('fps', 0):.0f}fps lat {self.source.stats.get('capture_latency_ms') or 0:.0f}ms"
+                        f"  depthmask {'ready' if self.depth_mask is not None and self.depth_mask.ready else 'learning'}"
+                        f"  3D {'on' if self.proj3d is not None else 'off'}" if self.sensor_kind == "iphone" else "")}
             want_comp = self.writer is not None or bool(self.cfg["display"].get("debug_show_composite", False))
             dbg = draw_debug(frame, track, info, self.tracker.min_vis,
                              composite=comp if want_comp else None, show_overlay=self.show_overlay,

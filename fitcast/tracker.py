@@ -539,14 +539,35 @@ class Tracker:
                 self._person_full[roi[1]:roi[3], roi[0]:roi[2]] = person
                 person = self._person_full
         t1 = time.perf_counter()
+        return self._finish(frame_bgr, ts, ms, joints, vis, person, t0, t1)
+
+    def process_external(self, frame_bgr: np.ndarray, ts: float, joints: np.ndarray, vis: np.ndarray,
+                         person_mask: np.ndarray | None) -> TrackResult:
+        """3D sensor path: joints/visibility come from the phone (already in camera px, 33-point order) and the
+        whole-person gate from the depth mask (uint8 0/255 at camera res). Runs the clothes segmenter on the
+        frame and then the same mask / facing / head-box logic as `process()`."""
+        t0 = time.perf_counter()
+        ms = self.backend.timestamp_ms(ts)
+        person = None
+        if person_mask is not None:
+            np.copyto(self._person_full, person_mask, casting="unsafe")
+            self._person_full *= (1.0 / 255.0)
+            person = self._person_full
+        t1 = time.perf_counter()
+        return self._finish(frame_bgr, ts, ms, np.asarray(joints, np.float32).copy(),
+                            np.asarray(vis, np.float32).copy(), person, t0, t1)
+
+    def _finish(self, frame_bgr: np.ndarray, ts: float, ms: int, joints: np.ndarray, vis: np.ndarray,
+                person: np.ndarray | None, t0: float, t1: float) -> TrackResult:
         self._n += 1
         ok = bool(vis[L_SHOULDER] >= self.min_vis and vis[R_SHOULDER] >= self.min_vis and
-                  np.isfinite(joints).all() and vis.max() > 0)
+                  np.isfinite(joints[:, :2][vis > 0]).all() and vis.max() > 0)
         if not ok:
             self._prev_area = -1.0
             self._prev_center = None
             self.timings = {"pose_ms": (t1 - t0) * 1e3, "seg_ms": 0.0, "mask_ms": 0.0}
             return TrackResult.empty(self.H, self.W, ts)
+        np.nan_to_num(joints, copy=False)
         self._prev_center = (joints[L_SHOULDER, :2] + joints[R_SHOULDER, :2] + joints[L_HIP, :2] + joints[R_HIP, :2]) / 4
         # zero visibility for landmarks outside the frame (knees below the frame still report 0.6+)
         inside = ((joints[:, 0] >= self.margin) & (joints[:, 0] <= self.W - self.margin) &
