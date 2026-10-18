@@ -169,6 +169,7 @@ calibration:
   refine_done_px: 4         # --refine: stop when the measured offset is below this (camera px)
   refine_wait_s: 20         # --refine: wait this long for a tracked person before giving up
   refine_max_px: 150        # --refine: offsets above this are rejected (wrong person / disc off the body)
+  refine_depth_change_frac: 0.08   # --refine: torso length differing from the reference spot by more than this = second depth point
 
 sizing:
   height_cm: 175            # operator enters this; --height overrides

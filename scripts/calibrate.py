@@ -419,6 +419,7 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
     from fitcast.calibration import Calibration, _diff_gray, _marker_binary, capture_median
     from fitcast.tracker import Tracker
     from fitcast.types import L_HIP, L_SHOULDER, R_HIP, R_SHOULDER
+    from fitcast import geometry as geo
     cfg = config["calibration"]
     cam_size = (int(config["capture"]["width"]), int(config["capture"]["height"]))
     cal = Calibration(cfg, cam_size)
@@ -459,13 +460,20 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
             j = track.joints
             sc = (j[L_SHOULDER, :2] + j[R_SHOULDER, :2]) / 2
             hc = (j[L_HIP, :2] + j[R_HIP, :2]) / 2
+            torso_px = geo.torso_length(j)
+            ref_t = cal.data.depth_ref_torso_px
+            new_depth = ref_t is not None and abs(torso_px - ref_t) / ref_t > float(cfg["refine_depth_change_frac"])
+            if it == 0:
+                print(f"REFINE: torso length {torso_px:.0f} px" + (f" (reference spot {ref_t:.0f} px)" if ref_t else "")
+                      + ("  -> DIFFERENT distance: measuring the depth slope" if new_depth else "  -> reference spot"))
             targets = np.array([sc + 0.35 * (hc - sc), sc + 0.9 * (hc - sc)], np.float64)   # chest, lower belly
             dark = capture_median(black_frame(cfg), rig.capture, rig.show, settle, nmed)
             errors = []
             for k, t in enumerate(targets):
                 canvas = np.zeros((cam_size[1], cam_size[0], 3), np.uint8)
                 cv2.circle(canvas, (int(t[0]), int(t[1])), radius, (255, 255, 255), -1)
-                lit = capture_median(cal.to_projector(canvas).copy(), rig.capture, rig.show, settle, nmed)
+                shift = cal.depth_shift(torso_px) if new_depth else None
+                lit = capture_median(cal.to_projector(canvas, shift).copy(), rig.capture, rig.show, settle, nmed)
                 diff = _diff_gray(lit, dark)
                 binary = _marker_binary(diff, cfg, peak=float(cv2.GaussianBlur(diff, (5, 5), 0).max()))
                 n, labels, stats, cents = cv2.connectedComponentsWithStats(binary, connectivity=8)
@@ -495,10 +503,25 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
             if np.linalg.norm(e) < float(cfg["refine_done_px"]):
                 print("REFINE: within tolerance, done")
                 break
+            if new_depth:
+                # H is already right at the reference spot; the residual here IS the depth effect.
+                # Apply the model's current prediction first so repeated passes converge on the slope.
+                predicted = np.array(cal.depth_shift(torso_px))
+                total = predicted + e
+                slope = total / (torso_px - ref_t)
+                cal.data.depth_slope = [float(slope[0]), float(slope[1])]
+                print(f"REFINE: depth slope set to ({slope[0]:+.3f}, {slope[1]:+.3f}) camera px per torso px "
+                      f"(total offset {total.round(1)} at {torso_px:.0f} px vs reference {ref_t:.0f} px)")
+                # verify on the next pass with the model applied: project the probe through the shifted H
+                cal._set_data(cal.data)
+                continue
             T = np.array([[1, 0, -e[0]], [0, 1, -e[1]], [0, 0, 1]], np.float64)
             cal.data.H = cal.data.H @ T
+            cal.data.depth_ref_torso_px = float(torso_px)
             cal._set_data(cal.data)
-        cal.data.timestamp = cal.data.timestamp + " refined"
+        if cal.data.depth_ref_torso_px is None:
+            cal.data.depth_ref_torso_px = float(torso_px)
+        cal.data.timestamp = cal.data.timestamp.replace(" refined", "") + " refined"
         cal.save(out)
         print(f"saved refined calibration to {out}")
         return 0

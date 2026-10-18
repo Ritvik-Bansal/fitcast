@@ -60,6 +60,8 @@ class CalibrationData:
     verified: bool
     verify_max_err_px: float | None     # camera px
     simulated: bool = False             # produced by --simulate: never valid for a real camera
+    depth_ref_torso_px: float | None = None   # torso length (px) at the standing spot H was refined for
+    depth_slope: list[float] | None = None    # camera-px shift per px of torso length away from that spot (dx, dy)
 
 
 def _size(s) -> tuple[int, int]:
@@ -92,7 +94,9 @@ def _rescale_data(d: CalibrationData, new_size: tuple[int, int]) -> CalibrationD
         rect = [round(x0 * sx), round(y0 * sy), round(x1 * sx), round(y1 * sy)]
     verr = None if d.verify_max_err_px is None else d.verify_max_err_px * (sx + sy) / 2
     return dataclasses.replace(d, H=H / H[2, 2], camera_size=new_size, gallery_rect=rect,
-                               verify_max_err_px=verr, simulated=d.simulated)
+                               verify_max_err_px=verr, simulated=d.simulated,
+                               depth_ref_torso_px=None if d.depth_ref_torso_px is None else d.depth_ref_torso_px * (sx + sy) / 2,
+                               depth_slope=d.depth_slope)
 
 
 def _data_from_dict(raw) -> CalibrationData:
@@ -118,6 +122,8 @@ def _data_from_dict(raw) -> CalibrationData:
         verified=bool(raw.get("verified", False)),
         verify_max_err_px=None if verr is None else float(verr),
         simulated=bool(raw.get("simulated", False)),
+        depth_ref_torso_px=None if raw.get("depth_ref_torso_px") is None else float(raw["depth_ref_torso_px"]),
+        depth_slope=None if raw.get("depth_slope") is None else [float(v) for v in raw["depth_slope"]],
     )
 
 
@@ -207,6 +213,8 @@ class Calibration:
             "verified": bool(d.verified),
             "verify_max_err_px": None if d.verify_max_err_px is None else float(d.verify_max_err_px),
             "simulated": bool(d.simulated),
+            "depth_ref_torso_px": None if d.depth_ref_torso_px is None else float(d.depth_ref_torso_px),
+            "depth_slope": None if d.depth_slope is None else [float(v) for v in d.depth_slope],
         }
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("# FitCast calibration: H maps camera px -> projector px. "
@@ -221,8 +229,19 @@ class Calibration:
             self._letterbox_cache = ((w, h), M)
         return self._letterbox_cache[1]
 
-    def to_projector(self, img_cam: np.ndarray) -> np.ndarray:
-        """Warp a camera-space image into the (ph, pw) projector frame.
+    def depth_shift(self, torso_px: float | None) -> tuple[float, float]:
+        """Camera-space shift to apply for a person whose torso length is `torso_px`, from the two-point depth
+        model recorded by `calibrate.py --refine` (zero when the model is absent)."""
+        d = self.data
+        if d is None or torso_px is None or d.depth_ref_torso_px is None or d.depth_slope is None:
+            return 0.0, 0.0
+        dt = float(torso_px) - float(d.depth_ref_torso_px)
+        return float(d.depth_slope[0]) * dt, float(d.depth_slope[1]) * dt
+
+    def to_projector(self, img_cam: np.ndarray, shift: tuple[float, float] | None = None) -> np.ndarray:
+        """Warp a camera-space image into the (ph, pw) projector frame. `shift` = (dx, dy) camera px the light
+        would land away from the intended spot at the person's current depth (see `depth_shift`); it is
+        compensated by pre-translating the image.
 
         Returns an internal buffer reused on every call: copy it to keep it past the next call.
         Without a calibration the image is letterboxed into the frame instead (logged once).
@@ -234,6 +253,8 @@ class Calibration:
                 raise ValueError(f"to_projector got a {w}x{h} image, calibration camera space is "
                                  f"{self.camera_size[0]}x{self.camera_size[1]}")
             M = self.data.H
+            if shift is not None and (shift[0] or shift[1]):
+                M = M @ np.array([[1.0, 0.0, -shift[0]], [0.0, 1.0, -shift[1]], [0.0, 0.0, 1.0]])
         else:
             if not self._warned_fallback:
                 logger.warning("No calibration: projecting a letterboxed camera image. Fix: %s.", _FIX)

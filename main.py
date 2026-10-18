@@ -131,6 +131,8 @@ class App:
         self.stall_exit_s = float(cfg["capture"]["stall_exit_s"])
         self.reopen_s = float(cfg["capture"]["reopen_s"])
         self.pump_every = max(1, int(cfg["display"].get("pump_every_n", 1)))
+        self._torso_ema: float | None = None
+        self.depth_shift = (0.0, 0.0)
         self._last_reopen = 0.0
         self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
         self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
@@ -268,7 +270,13 @@ class App:
         t1 = time.perf_counter()
         rgba = self.renderer.draw(track, self.gallery.current)
         comp = self.compositor.compose(rgba, track, self.gallery, now)
-        proj = self.calib.to_projector(comp)
+        if track.ok:
+            from fitcast import geometry as _geo
+            t_px = _geo.torso_length(track.joints)
+            self._torso_ema = t_px if self._torso_ema is None else 0.8 * self._torso_ema + 0.2 * t_px
+        shift = self.calib.depth_shift(self._torso_ema)
+        self.depth_shift = shift
+        proj = self.calib.to_projector(comp, shift)
         t2 = time.perf_counter()
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)
@@ -286,7 +294,8 @@ class App:
                     "seg_ms": tm.get("seg_ms", 0.0), "render_ms": self.render_ms,
                     "ratio": self.tracker.facing.ratio, "mask_mode": self.tracker.mask_mode,
                     "fallback": self.tracker.fallback_active, "outfit": self.gallery.current.name,
-                    "calib": f"ok {self.calib.data.reproj_error_px:.1f}px" if self.calib.ok else "MISSING",
+                    "calib": (f"ok {self.calib.data.reproj_error_px:.1f}px depth({self.depth_shift[0]:+.0f},{self.depth_shift[1]:+.0f})"
+                              if self.calib.ok else "MISSING"),
                     "extra": f"frame {self.frames}"}
             want_comp = self.writer is not None or bool(self.cfg["display"].get("debug_show_composite", False))
             dbg = draw_debug(frame, track, info, self.tracker.min_vis,

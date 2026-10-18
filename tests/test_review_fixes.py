@@ -117,3 +117,23 @@ def test_simulated_calibration_refused_for_live_sources(config, tmp_path):
     assert live.load(str(out)) is False and not live.ok
     clip = Calibration(config["calibration"], cam)
     assert clip.load(str(out), allow_simulated=True) is True and clip.ok
+
+
+def test_depth_model_shift_and_roundtrip(config, tmp_path):
+    from fitcast.calibration import Calibration, SimulatedRig, make_sim_homography, run_calibration
+    cam = (1280, 720)
+    rig = SimulatedRig(config["calibration"], cam, make_sim_homography(cam, (1920, 1080)))
+    cal = run_calibration(config["calibration"], cam, rig.capture, rig.show, log=lambda *a, **k: None)
+    assert cal.depth_shift(200.0) == (0.0, 0.0)
+    cal.data.depth_ref_torso_px, cal.data.depth_slope = 200.0, [0.1, 0.5]
+    assert cal.depth_shift(240.0) == pytest.approx((4.0, 20.0))
+    out = tmp_path / "c.yaml"; cal.save(str(out))
+    back = Calibration(config["calibration"], cam); assert back.load(str(out), allow_simulated=True)
+    assert back.depth_shift(240.0) == pytest.approx((4.0, 20.0))
+    # a shifted warp moves content by exactly the shift: a pixel drawn at p lands where p - shift used to
+    img = np.zeros((720, 1280, 3), np.uint8); img[300:310, 600:610] = 255
+    a = back.to_projector(img).copy()
+    img2 = np.zeros_like(img); img2[320:330, 604:614] = 255          # drawn 4 px right, 20 px lower ...
+    b = back.to_projector(img2, (4.0, 20.0)).copy()                   # ... with the shift compensating it
+    ya, xa = np.nonzero(a[:, :, 0]); yb, xb = np.nonzero(b[:, :, 0])
+    assert abs(ya.mean() - yb.mean()) < 1.5 and abs(xa.mean() - xb.mean()) < 1.5
