@@ -443,6 +443,7 @@ stylist:                    # optional Gemini outfit picker (needs network + a k
   temperature: 0.4
   grounding: false          # google_search tool for live shop links (needs quota)
   speak: true               # macOS `say` reads the one-sentence answer
+  output_volume: 100        # system output volume set at start (chime and answers must carry 5 m)
   message_s: 30             # how long the answer + shopping list stays on the wall
   record_key: v             # press once to start recording, again to send
   record_device: ":0"       # ffmpeg avfoundation audio device (":0" = default microphone)
@@ -458,11 +459,14 @@ stylist:                    # optional Gemini outfit picker (needs network + a k
     device: ":0"            # ffmpeg avfoundation audio device (fallback) ...
     device_name: MacBook    # ... resolved by name each start: indices shift when a phone or headset appears
     gain: 3.0               # software gain before recognition (the person stands ~5 m from the laptop)
-    say_on_wake: "Yes?"     # spoken acknowledgement in addition to the chime
+    say_on_wake: ""        # spoken acknowledgement (off: the booth's own voice was being recorded as the request)
+    chime_volume: 4         # afplay gain for the wake chime
     max_restarts: 20
     wake_words: [fitbot, fit bot, fit but, fitbit, fit bit, fat bit, fit bought, feet bot, fit pot]   # how the small model hears "Fitbot"
     silence_rms: 250        # int16 RMS below this = silence
-    silence_s: 0.9          # pause that ends the request
+    silence_s: 1.4          # pause that ends the request (people pause mid-sentence)
+    ack_mute_s: 0.8         # right after the wake word the chime plays: not speech
+    min_speech_s: 0.5       # at least this much speech before a pause can end the request
     max_request_s: 10
     pre_roll_s: 0.6
     chime: /System/Library/Sounds/Glass.aiff

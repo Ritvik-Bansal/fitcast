@@ -137,7 +137,10 @@ class GeminiStylist:
         return (
             "You are the stylist of a projection-mapped virtual try-on booth. The booth can only show the garments in "
             "this catalogue, one top and one bottom at a time:\n\n" + self.catalog() + link_rule + "\n\n" + req + "\n\n"
-            "Pick exactly one top id and one bottom id that best fit the request (occasion, formality, colours, budget). "
+            "If the audio or text contains no actual clothing request (only the wake word, noise, silence or an unrelated "
+            "remark), set top_id and bottom_id to null and say so in `say`; never invent an outfit for an empty request. "
+            "Otherwise pick exactly one top id and one bottom id that best fit the request (occasion, formality, colours, "
+            "budget); a named brand or colour in the request must be matched when the catalogue has it. "
             "If the request names garments the catalogue does not have, pick the closest match and say so briefly. "
             "For shopping, list the known links of the chosen top and bottom; add at most one more real store suggestion "
             "only if it helps the budget. If a budget is given keep the total under it. Reply with JSON only, no markdown, "

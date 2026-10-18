@@ -29,11 +29,17 @@ def normalise(text: str) -> str:
     return re.sub(r"[^a-z ]+", " ", text.lower()).strip()
 
 
+_WAKE_RE = re.compile(r"\b(fit|fitt|fed|phet|feet|vit|fitz|fift|foot)\s*(bot|bots|but|bit|pot|bought|boat|box|bud|bat|bart|part|pod|bob|bad|bet|boss|bought)\b")
+
+
 def wake_in(text: str, variants: tuple[str, ...] | list[str] = _DEFAULT_VARIANTS) -> bool:
-    """True when any wake variant occurs in `text` (spaces ignored, so 'fit bot' == 'fitbot')."""
+    """True when any wake variant occurs in `text` (spaces ignored, so 'fit bot' == 'fitbot'), or the small model's
+    usual mishearings of "Fitbot": a 'fit'-like word followed by a 'bot'-like word."""
     t = normalise(text)
     squashed = t.replace(" ", "")
-    return any(v.replace(" ", "") in squashed for v in variants)
+    if any(v.replace(" ", "") in squashed for v in variants):
+        return True
+    return _WAKE_RE.search(t) is not None
 
 
 def strip_wake(text: str, variants: tuple[str, ...] | list[str] = _DEFAULT_VARIANTS) -> str:
@@ -66,6 +72,8 @@ class WakeListener(threading.Thread):
         self.chunk = int(self.rate * 0.1) * 2                  # 100 ms of int16
         self.silence_rms = float(cfg.get("silence_rms", 250))
         self.silence_s = float(cfg.get("silence_s", 0.9))
+        self.ack_mute_s = float(cfg.get("ack_mute_s", 0.8))
+        self.min_speech_s = float(cfg.get("min_speech_s", 0.5))
         self.max_request_s = float(cfg.get("max_request_s", 10))
         self.pre_roll = int(float(cfg.get("pre_roll_s", 0.6)) / 0.1)
         self.out_path = Path(cfg.get("request_file", "out/wake_request.wav"))
@@ -127,7 +135,7 @@ class WakeListener(threading.Thread):
             return
         ring: deque[bytes] = deque(maxlen=self.pre_roll)
         buf: list[bytes] = []
-        silence, heard, t_start = 0.0, False, 0.0
+        silence, heard, t_start, speech_s = 0.0, False, 0.0, 0.0
         log.info("wake word listening (%s)", "microphone" if self.source is None else self.source)
         restarts, last_beat, beat_rms, beat_n = 0, time.perf_counter(), 0.0, 0
         gain = float(self.cfg.get("gain", 1.0))
@@ -160,27 +168,35 @@ class WakeListener(threading.Thread):
                     text = json.loads(rec.Result()).get("text", "")
                 else:
                     text = json.loads(rec.PartialResult()).get("partial", "")
-                if text and time.perf_counter() - getattr(self, "_last_text_log", 0.0) > 3.0:
+                if text and (time.perf_counter() - getattr(self, "_last_text_log", 0.0) > 3.0 or "fit" in text or "fet" in text):
                     log.info("heard: %r", text[-60:])
                     self._last_text_log = time.perf_counter()
                 if text and wake_in(text, self.variants):
                     log.info("wake word heard: %r", text)
                     self.state = "listening"
                     buf, silence, heard, t_start = list(ring), 0.0, False, time.perf_counter()
+                    speech_s = 0.0
                     rec.Reset()
                     self.on_wake()
                 continue
-            # listening: collect until a pause after speech, or the maximum length
+            # listening: collect until a pause after speech, or the maximum length. The first `ack_mute_s` after
+            # the wake word are the booth's own chime / voice and never count as speech.
             buf.append(data)
             rec.AcceptWaveform(data)
             rms = float(np.sqrt(np.mean(np.frombuffer(data, np.int16).astype(np.float32) ** 2)))
+            since_wake = time.perf_counter() - t_start
+            if since_wake < self.ack_mute_s:
+                continue
             if rms >= self.silence_rms:
-                heard, silence = True, 0.0
+                speech_s += 0.1
+                silence = 0.0
+                if speech_s >= self.min_speech_s:
+                    heard = True
             else:
                 silence += 0.1
             if heard and silence >= self.silence_s:
                 self._emit(buf, rec)
-                buf, silence, heard = [], 0.0, False
+                buf, silence, heard, speech_s = [], 0.0, False, 0.0
             elif time.perf_counter() - t_start > self.max_request_s:
                 if heard:
                     self._emit(buf, rec)
@@ -189,7 +205,7 @@ class WakeListener(threading.Thread):
                     rec.Reset()
                     self.state = "idle"
                     self.on_request(None, "")
-                buf, silence, heard = [], 0.0, False
+                buf, silence, heard, speech_s = [], 0.0, False, 0.0
         if self.state == "listening" and buf and heard:
             self._emit(buf, rec)                                   # file source ended mid-request
         err = (self._proc.stderr.read().decode(errors="replace") if self._proc and self._proc.stderr else "").strip()

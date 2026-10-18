@@ -215,6 +215,9 @@ class App:
                 if wcfg.get("enabled", True):
                     from fitcast.wakeword import WakeListener
                     subprocess.run(["pkill", "-f", "ffmpeg -loglevel error -f avfoundation -i :"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    vol = scfg.get("output_volume")
+                    if vol is not None:
+                        subprocess.Popen(["osascript", "-e", f"set volume output volume {int(vol)}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.wake = WakeListener(wcfg, on_wake=lambda: self._wake_events.put(("wake", None)),
                                              on_request=lambda path, hint: self._wake_events.put(("request", (path, hint))),
                                              on_error=lambda msg: self._wake_events.put(("error", msg)))
@@ -660,10 +663,11 @@ class App:
                 self.compositor.set_message(["Yes? I'm listening..."], now, 15)
                 chime = scfg.get("wake", {}).get("chime", "/System/Library/Sounds/Glass.aiff")
                 if chime:
-                    subprocess.Popen(["afplay", chime], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if scfg.get("wake", {}).get("say_on_wake", "Yes?"):
+                    subprocess.Popen(["afplay", "-v", str(scfg.get("wake", {}).get("chime_volume", 4)), chime],
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if scfg.get("wake", {}).get("say_on_wake", ""):
                     from fitcast.stylist import speak
-                    speak(str(scfg["wake"].get("say_on_wake", "Yes?")))
+                    speak(str(scfg["wake"].get("say_on_wake")))
             elif kind == "request":
                 path, hint = payload
                 if path is None:
@@ -680,6 +684,13 @@ class App:
         if r.error:
             log.error("stylist failed: %s", r.error)
             self.compositor.set_message(["Stylist unavailable", r.error[:60]], now, 8)
+            return
+        if r.top_index is None and r.bottom_index is None:
+            log.info("stylist understood no request (%r); outfit unchanged", r.question)
+            self.compositor.set_message(["Didn't catch that.", "Say Fitbot, wait for the chime, then ask."], now, 6)
+            if scfg.get("speak", True):
+                from fitcast.stylist import speak
+                speak("Sorry, I didn't catch that. Say Fitbot, then ask.")
             return
         self.set_pair(r.top_index, r.bottom_index, now)
         self.last_gesture_t = now
