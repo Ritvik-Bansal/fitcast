@@ -85,3 +85,9 @@ Each milestone: what was run, what was observed.
 - Refine hardened: waits for 10 still frames, probe blob area must be 0.3-3x the drawn disc, chest/belly probes must agree within 30 px, nothing is saved when a pass is rejected. Converged 74 -> 23 -> 7.8 px at the mark (run A), 12 px on a repeat.
 - Depth model (two-point refine) implemented, but the subject only moved 10-15% in distance so the slope was noise (-2.4 px/px); cleared. `--depth-point` now requires a >= 25% torso-length change. The base mapping at the mark is what the demo relies on; co-locating the camera with the projector (iPhone on the projector) is the real fix for depth.
 - Run 7 (19:04): 1302 frames / 46.8 s = 27.8 fps, 12 swipes, garment visibly on the shirt/trousers in the camera frames; size panel reads XL/shoulder 58 cm for the second subject because `sizing.height_cm` is still the 175 cm default.
+
+## State of play before the 3D upgrade (2026-10-17 19:20)
+- 2D system: offline verified; live verified at the mark after `--auto` + `--refine`; every live failure today was mechanical (camera moved 3x, people in the beam during calibration). Skeleton-on-projector overlay (key k) shows the transfer error directly.
+- Decision (user): proceed with docs/BUILD_SPEC_3D.md (iPhone 17 Pro LiDAR, full projector calibration, depth-correct GPU render) while keeping `--sensor webcam`.
+- Toolchain: Xcode 26.2 + xcodegen 2.44.1 + Swift 6.2.3 present; ios/project.yml has signing team KQ3W39U2QQ and ARKit/camera keys; iPhone 17 Pro visible to devicectl but "unavailable" (needs USB + trust + Developer Mode).
+- Plan: researcher verifies ARKit/Vision/usbmux/OpenCV APIs; builders in parallel for (a) GPU depth-mesh projector `fitcast/render3d.py`, (b) depth body mask `fitcast/depthmask.py`, (c) Mac receiver + wire protocol `fitcast/sensors/iphone.py`, (d) `scripts/calibrate3d.py` with a synthetic test rig; iOS app builder after the research; reviewer on hardware data.

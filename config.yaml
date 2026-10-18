@@ -238,3 +238,40 @@ garments:
   thumb_margin_frac: 0.06
   opaque_alpha: 250
   luminance_alpha: 128      # pixels with alpha above this count toward mean luminance
+
+# ---------------- 3D sensor path (docs/BUILD_SPEC_3D.md) ----------------
+sensor:
+  kind: webcam              # webcam | iphone  (--sensor overrides)
+  port: 7777                # TCP port the phone app listens on
+  usbmux: true              # forward the port over USB with pymobiledevice3; false = connect to `host`
+  host: 127.0.0.1
+  connect_timeout_s: 10
+  stale_ms: 500
+
+depthmask:
+  background_frames: 60     # ~2 s at 30 fps of the empty scene
+  closer_than_background_m: 0.08
+  box_m: [-1.0, 1.0, -1.5, 1.2, 1.5, 5.0]   # x0 x1 y0 y1 z0 z1 metres around the mark (OpenCV camera coords)
+  min_confidence: 1         # ARKit depth confidence 0 low, 1 medium, 2 high
+  open_px: 3
+  close_px: 7
+  guided_radius_px: 8       # edge-aware upsampling of the low-res depth mask with the RGB image
+  guided_eps: 0.001
+  fuse_person_seg: true
+  fuse_skeleton: true
+
+render3d:
+  backend: moderngl
+  depth_gap_m: 0.12         # skip triangles across depth discontinuities larger than this
+  fill_holes_px: 2          # tiny holes only, never across real gaps
+  mesh_step: 1              # 1 = one vertex per depth pixel
+
+calibration3d:
+  file: calibration3d.yaml
+  throw_ratio_guess: 1.19   # Epson CO-FH02 (image width = distance / throw ratio)
+  gray_code_white_threshold: 5
+  gray_code_black_threshold: 40
+  frames_per_pattern: 3
+  min_depth_confidence: 2
+  ransac_reproj_px: 3.0
+  target_reproj_px: 1.5

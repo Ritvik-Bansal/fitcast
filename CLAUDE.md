@@ -80,3 +80,70 @@ the camera.
 - Test clips: `assets/test/white_turn.mp4`, `assets/test/pink_turn.mp4` (4K, 25 fps, cropped above the knees).
 - Only the lead edits this file and `fitcast/types.py`. Builders propose changes in their report.
 - Record non-obvious choices in `DECISIONS.md`, milestone checks in `PROGRESS.md`.
+
+
+## 3D sensor path (iPhone 17 Pro LiDAR) — see docs/BUILD_SPEC_3D.md
+
+`--sensor webcam` (default) keeps everything above. `--sensor iphone` replaces capture+tracker with
+`fitcast/sensors/iphone.py` and replaces `Calibration.to_projector` with `fitcast/render3d.py`.
+TrackResult gains `depth`, `joints3d`, `K_cam` (None on the webcam path). Camera space is still the
+sensor's colour image (downscaled to `capture.width x height`); depth is resampled to it.
+
+### Wire protocol (phone -> Mac), `fitcast/sensors/protocol.py`
+TCP stream, little-endian. Message = fixed header + JSON header + payload:
+```
+u32 magic = 0x46435331 ('FCS1')   u8 version = 1   u8 msg_type (1 frame, 2 info, 3 ping)
+u16 json_len                       u32 payload_len
+json[json_len]                     payload[payload_len]
+```
+Frame JSON: `ts` (ARFrame timestamp, s), `send_ts` (phone monotonic, s), `img_w`, `img_h`, `K` = [fx, fy, cx, cy]
+for the captured image, `depth_w`, `depth_h`, `rgb_w`, `rgb_h`, `joint_names` (19 Vision names),
+`joints2d` [[x, y, conf] x 19] in captured-image pixels (NaN when missing), `joints3d` [[X, Y, Z] x 19] metres in
+ARKit camera coords (+x right, +y up, -z forward; NaN when no valid depth),
+`blobs`: list of {name, dtype, shape, offset, nbytes} describing the payload:
+`depth` float16 (depth_h, depth_w) metres; `conf` uint8 (depth_h, depth_w) 0..2 (ARKit confidence);
+`seg` uint8 (seg_h, seg_w) 0/255 person segmentation (optional); `rgb` JPEG bytes (optional).
+Depth intrinsics = K scaled by depth_w/img_w, depth_h/img_h. The Mac converts ARKit camera coords to OpenCV
+(y and z negated). Transport: the phone is a TCP server on `sensor.port` (7777); the Mac connects over
+`pymobiledevice3` usbmux port forwarding (USB) or a Wi-Fi IP.
+
+### Vision 19 -> MediaPipe 33 joint mapping
+nose 0, left_eye 2, right_eye 5, left_ear 7, right_ear 8, left_shoulder 11, right_shoulder 12, left_elbow 13,
+right_elbow 14, left_wrist 15, right_wrist 16, left_hip 23, right_hip 24, left_knee 25, right_knee 26,
+left_ankle 27, right_ankle 28. `neck` and `root` are not mapped. Remaining face indices copy the nearest eye/nose
+(as the rtmlib backend does). Confidence -> visibility.
+
+### Module contracts
+```python
+# fitcast/depthmask.py
+class DepthBodyMask:
+    def __init__(self, cfg: dict, depth_size: tuple[int,int], cam_size: tuple[int,int]) -> None   # cfg = config["depthmask"]
+    def learn_background(self, depth_frames: list[np.ndarray], conf_frames: list[np.ndarray]) -> None   # median of the empty scene
+    @property ready(self) -> bool
+    def compute(self, depth: np.ndarray, conf: np.ndarray, rgb_cam: np.ndarray,
+                person_seg: np.ndarray | None = None, skeleton_mask: np.ndarray | None = None) -> np.ndarray  # (H,W) uint8 camera res
+
+# fitcast/render3d.py
+class DepthMeshProjector:
+    def __init__(self, cfg: dict, cam_size: tuple[int,int], proj_size: tuple[int,int],
+                 K_cam: np.ndarray, K_p: np.ndarray, dist_p: np.ndarray, R: np.ndarray, t: np.ndarray) -> None  # cfg = config["render3d"]
+    def render(self, image_cam: np.ndarray, depth_cam: np.ndarray, valid: np.ndarray | None = None) -> np.ndarray
+        # image_cam (H,W,3) BGR camera space; depth_cam (H,W) float32 metres (0 = invalid) at camera res; -> (ph,pw,3) BGR
+    def set_extrinsics(self, R, t) -> None
+
+# fitcast/calib3d.py (+ scripts/calibrate3d.py)
+@dataclass
+class Calibration3D: K_cam, dist_cam, K_p, dist_p, R, t, cam_size, proj_size, reproj_error_px, n_points, timestamp, notes
+def save_calibration3d(path, c) / load_calibration3d(path) -> Calibration3D
+def gray_code_patterns(proj_size) -> list[np.ndarray]           # + white + black, OpenCV GrayCodePattern
+def decode_gray_code(captures: list[np.ndarray], white, black, proj_size, cfg) -> (proj_xy (H,W,2) float32, valid (H,W) bool)
+def solve_projector(cam_pts3d (N,3), proj_pts2d (N,2), proj_size, throw_ratio_guess, cfg) -> Calibration3D-ish + error
+
+# fitcast/sensors/iphone.py
+class IPhoneSensor:   # background thread, latest frame only
+    def __init__(self, cfg: dict, cam_size: tuple[int,int]) -> None   # cfg = config["sensor"]
+    def start(self) -> "IPhoneSensor"; def stop(self) -> None
+    def read(self) -> tuple[np.ndarray, float, int] | None            # (frame_bgr camera space, timestamp, seq) like FrameSource
+    def track(self) -> TrackResult | None                             # latest decoded TrackResult (depth, joints3d, K_cam filled)
+```
+Only the lead edits this file and `fitcast/types.py`.

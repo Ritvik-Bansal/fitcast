@@ -25,6 +25,10 @@ class TrackResult:
     ref_shoulder_width: float = 0.0
     person_mask: np.ndarray | None = None   # (H, W) uint8 0/255 dilated whole-person mask when the backend has one
     facing_ratio: float = 1.0               # normalised shoulder width / frontal reference (1 = squarely frontal)
+    # 3D sensor path (iPhone LiDAR); None on the webcam path
+    depth: np.ndarray | None = None         # (H, W) float32 metres, camera space (0 = invalid)
+    joints3d: np.ndarray | None = None      # (33, 3) float32 metres, OpenCV camera coords (+x right, +y down, +z forward); NaN = unknown
+    K_cam: np.ndarray | None = None         # (3, 3) float64 intrinsics of the camera space image
 
     @staticmethod
     def empty(h: int, w: int, timestamp: float = 0.0) -> "TrackResult":
