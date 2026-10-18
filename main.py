@@ -236,7 +236,7 @@ class App:
         """Strips on both sides of the beam and the stylist message band at the top between them."""
         left, right = self._gallery_rects()
         self.compositor.set_gallery_rects(left, right)
-        band_h = int(0.2 * (left[3] - left[1]))
+        band_h = int(0.3 * (left[3] - left[1]))
         self.compositor.set_message_rect([left[2] + 8, left[1], right[0] - 8, left[1] + band_h])
 
     def set_pair(self, top: int | None, bottom: int | None, now: float) -> None:
