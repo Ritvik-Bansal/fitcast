@@ -195,6 +195,7 @@ class App:
         self.stylist = None
         self.recorder = None
         self.wake = None
+        self._dump_until, self._dump_n, self._dump_pending = 0.0, 0, -1
         self._frame_stats: list[str] | None = [] if cfg["logging"].get("frame_stats", False) else None
         if self._frame_stats is not None:
             Path(cfg["logging"].get("frame_stats_file", "out/frame_stats.csv")).write_text("t,ok,facing,sw,mask_px,lit_px,fallback,outfit\n")
@@ -658,7 +659,17 @@ class App:
         else:
             track = self.tracker.process(frame, ts)
         track = self.smoother.update(track)
-        if self.frames % int(self.cfg["logging"].get("debug_jpeg_every_frames", 45)) == 0:
+        dump_file = Path("out/dump.now")
+        if self.frames % 10 == 0 and dump_file.exists():          # `touch out/dump.now`: 15 s of paired frames to out/turn/
+            dump_file.unlink(missing_ok=True)
+            self._dump_until = now + float(self.cfg["logging"].get("dump_s", 15))
+            self._dump_n = 0
+            Path("out/turn").mkdir(parents=True, exist_ok=True)
+            for f in Path("out/turn").glob("*.jpg"):
+                f.unlink()
+            log.info("frame dump started (%d s)", int(self.cfg["logging"].get("dump_s", 15)))
+        dumping = now < self._dump_until and self.frames % int(self.cfg["logging"].get("dump_every_frames", 6)) == 0
+        if self.frames % int(self.cfg["logging"].get("debug_jpeg_every_frames", 45)) == 0 or dumping:
             dbg = frame.copy()
             if not track.ok:
                 cv2.putText(dbg, "no person tracked", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2)
@@ -671,7 +682,13 @@ class App:
                 for a, b in ((11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24), (23, 24), (23, 25), (25, 27), (24, 26), (26, 28)):
                     if track.visibility[a] >= self.tracker.min_vis and track.visibility[b] >= self.tracker.min_vis:
                         cv2.line(dbg, tuple(int(v) for v in track.joints[a, :2]), tuple(int(v) for v in track.joints[b, :2]), (0, 255, 255), 2)
+                cv2.putText(dbg, f"{track.facing} sw {track.shoulder_width:.0f} ratio {track.facing_ratio:.2f}", (20, 40),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
                 cv2.imwrite("out/live_debug.jpg", dbg, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if dumping:
+                    cv2.imwrite(f"out/turn/{self._dump_n:03d}_cam.jpg", cv2.resize(dbg, (640, 360)), [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    self._dump_pending = self._dump_n
+                    self._dump_n += 1
         if self.frames % int(self.cfg["logging"].get("status_every_frames", 150)) == 0:
             log.info("status: %s facing %s sw %.0f px fps %.1f calib %s", "TRACKED" if track.ok else "no person",
                      track.facing if track.ok else "-", track.shoulder_width, self.fps,
@@ -764,6 +781,9 @@ class App:
         t2 = time.perf_counter()
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)
+        if self._dump_pending >= 0:
+            cv2.imwrite(f"out/turn/{self._dump_pending:03d}_proj.jpg", cv2.resize(proj, (640, 360)), [cv2.IMWRITE_JPEG_QUALITY, 80])
+            self._dump_pending = -1
         self.latency_ms = (time.perf_counter() - ts) * 1e3
         if self.predict_auto:
             # predict forward by the measured capture->display latency (clamped), per spec 4.3

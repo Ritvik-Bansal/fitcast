@@ -48,7 +48,7 @@ class Renderer:
             j[:, 1] += self.vertical_offset_frac * sw      # live-tunable global nudge (keys [ and ])
         ref = max(track.ref_shoulder_width, sw)
         back = track.facing == "back"
-        self._draw_bottoms(j, v, sw, outfit, back)
+        self._draw_bottoms(j, v, sw, outfit, back, side=track.facing == "side")
         self._draw_torso(j, v, sw, ref, outfit, track.facing)
         self._draw_sleeves(j, v, sw, outfit)
         return self.canvas
@@ -98,9 +98,22 @@ class Renderer:
                 self._warp_part(tex, src, geo.limb_quad(j[el, :2], j[wr, :2], wf, wf * t["forearm"],
                                                         extend0=overlap * t["forearm_overlap"]))
 
-    def _draw_bottoms(self, j: np.ndarray, v: np.ndarray, sw: float, outfit: Outfit, back: bool) -> None:
+    def _draw_bottoms(self, j: np.ndarray, v: np.ndarray, sw: float, outfit: Outfit, back: bool, side: bool = False) -> None:
         tex = outfit.bottom_back if (back and outfit.bottom_back is not None) else outfit.bottom_front
         if tex is None or not self._vis(v, L_HIP, R_HIP):
+            return
+        if side:
+            # side view: the two legs overlap in the image, so one column from the hip centre down (the mask clips it)
+            c = self.cfg
+            band_h = c["bottom_knee_frac"]
+            mid = lambda a, b: 0.5 * (j[a, :2] + j[b, :2])  # noqa: E731
+            w = 0.5 * float(c.get("side_leg_width_frac", 0.55)) * sw
+            if self._vis(v, L_KNEE, R_KNEE):
+                self._warp_part(tex, _src_quad(tex, (0.0, 0.0, 1.0, band_h)),
+                                geo.limb_quad(mid(L_HIP, R_HIP), mid(L_KNEE, R_KNEE), w, w * 0.9, extend0=0.3 * w))
+                if self._vis(v, L_ANKLE, R_ANKLE):
+                    self._warp_part(tex, _src_quad(tex, (0.0, band_h, 1.0, 1.0)),
+                                    geo.limb_quad(mid(L_KNEE, R_KNEE), mid(L_ANKLE, R_ANKLE), w * 0.9, w * 0.8, extend0=0.4 * w))
             return
         c = self.cfg
         band_h = c["waist_band_height_frac"]

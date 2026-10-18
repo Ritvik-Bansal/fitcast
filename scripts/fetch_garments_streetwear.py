@@ -13,8 +13,8 @@ Steps (default: all):
           A shop answering 403/503 is logged and skipped (earlier downloads are kept).
   build   cut each photo out (transparent PNG: its own alpha; otherwise the fetch_garments near-white /
           border-colour threshold -> grabCut -> feather), lay tops out with fetch_garments.layout_top +
-          torso_region and bottoms with layout_bottom + fetch_garments_bottoms.rectify_bottom (legs straight
-          and vertical, waist on top, hems at the bottom), then write each PAIRS outfit with
+          torso_region and bottoms with layout_bottom + fetch_garments_bottoms.rectify_bottom + fill_halves (legs
+          straight and vertical, each leg filling its half edge to edge, waist on top, hems at the bottom), then write each PAIRS outfit with
           prepare_garments.write_outfit (colour boost, real back photos, sleeve tile, thumbnail, meta.yaml).
   sheet   out/streetwear_sheet.jpg: thumb | top_front | top_back | bottom_front | bottom_back per outfit.
 Fetch/build also append (or refresh only) the "Streetwear" section of assets/garments/SOURCES.md.
@@ -45,7 +45,8 @@ for p in (ROOT, ROOT / "scripts"):
 from fitcast.garments import composite, garment_cfg, load_outfit  # noqa: E402
 from fetch_garments import (BG_DIST, TORSO_HEM_TOL, TORSO_MIN_FRAC, WORK_MAX_PX, _disk, _largest_filled,  # noqa: E402
                             flatten_chroma, garment_rgba, layout_bottom, layout_top, print_mask, torso_region)
-from fetch_garments_bottoms import rectify_bottom  # noqa: E402
+from fetch_garments_bottoms import (RECT_SPECK_FRAC, _crotch_row, _resample_rows, _spans,  # noqa: E402
+                                    rectify_bottom)
 from prepare_garments import _hex, _median_color, estimate_body_region, load_config, write_outfit  # noqa: E402
 
 log = logging.getLogger("fitcast.fetch_garments_streetwear")
@@ -57,6 +58,7 @@ FETCH_WIDTH = 1600          # requested image width (Shopify `width=` / Amplienc
 RETRIES = 3
 REQUEST_GAP_S = 1.2         # politeness gap between requests
 ALPHA_CUT = 127             # transparent-PNG photos: alpha above this is garment
+INPAINT_RADIUS = 3          # px, fills seams/notches left inside a filled bottoms texture
 SOURCES_HEADING = "## Streetwear (scripts/fetch_garments_streetwear.py)"
 NOTE = "retailer product photo, demo use only, not for redistribution"
 SHEET_ROW_H = 320
@@ -294,6 +296,42 @@ def _region(m: dict, front: np.ndarray, cfg: dict) -> tuple[float, float, float,
     return tuple(float(v) for v in r) if r else torso_box(front, cfg)
 
 
+def fill_halves(canvas: np.ndarray) -> np.ndarray:
+    """Make a rectified bottoms canvas fill its texture: below the crotch every row of each leg is resampled
+    from the fabric's left edge to its right edge across that leg's whole half (the renderer warps each half
+    onto one leg, so transparent margins there would leave dark bands on the thighs); above the crotch the
+    waist block is resampled across the full width as one piece; finally the garment rows are stretched over
+    the full height and leftover seams / crotch notches are inpainted, so the result is fully opaque fabric
+    (no transparent or black gap left for the renderer to warp onto a leg). Same size as the input."""
+    h, w = canvas.shape[:2]
+    alpha = canvas[..., 3] > 127
+    rows = np.flatnonzero(alpha.any(axis=1))
+    if rows.size == 0:
+        return canvas
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    half = w // 2
+    min_run = max(2, round(RECT_SPECK_FRAC * half))
+    cy = _crotch_row(alpha, y0, y1)
+    out = np.zeros_like(canvas)
+    for xs, hw in ((slice(0, half), half), (slice(half, w), w - half)):
+        spans = np.full((h, 2), np.nan, np.float32)
+        spans[cy:] = _spans(alpha[cy:, xs], min_run)
+        _resample_rows(canvas[:, xs], spans, range(cy, y1), lambda _s, hw=hw: hw, hw / 2.0, out[:, xs])
+    hip = np.full((h, 2), np.nan, np.float32)
+    hip[:cy] = _spans(alpha[:cy], min_run)
+    _resample_rows(canvas, hip, range(y0, cy), lambda _s: w, w / 2.0, out)
+    filled = np.flatnonzero((out[..., 3] > 127).any(axis=1))
+    if filled.size:
+        a, b = int(filled[0]), int(filled[-1]) + 1
+        out = cv2.resize(out[a:b], (w, h), interpolation=cv2.INTER_LINEAR)
+        # leftover feathered seams / crotch notches inside the fabric: fill from the surrounding fabric, opaque
+        holes = (out[..., 3] < 255).astype(np.uint8)
+        if holes.any():
+            rgb = cv2.inpaint(np.ascontiguousarray(out[..., :3]), holes, INPAINT_RADIUS, cv2.INPAINT_TELEA)
+            out = np.dstack([rgb, np.full((h, w), 255, np.uint8)])
+    return out
+
+
 def load_item(key: str, raw_dir: Path, cfg: dict) -> dict:
     """Laid-out canvases of an ITEMS key: {kind, front, back, region, detail} (region/detail for tops only)."""
     m = ITEMS[key]
@@ -306,9 +344,10 @@ def load_item(key: str, raw_dir: Path, cfg: dict) -> dict:
             front = flatten_chroma(front, float(m["print_dist"]))
         detail = print_mask(front, region, float(m["print_dist"])) if m.get("print_dist") and back is None else None
         return dict(kind="top", front=front, back=back, region=region, detail=detail)
-    front = rectify_bottom(layout_bottom(photo_rgba(raw_dir, key, m, cfg), cfg))
+    front = fill_halves(rectify_bottom(layout_bottom(photo_rgba(raw_dir, key, m, cfg), cfg)))
     # a back photo shows the person's left leg on the image left as seen from behind: used as-is
-    back = rectify_bottom(layout_bottom(photo_rgba(raw_dir, f"{key}_back", m, cfg), cfg)) if has_back else None
+    back = (fill_halves(rectify_bottom(layout_bottom(photo_rgba(raw_dir, f"{key}_back", m, cfg), cfg)))
+            if has_back else None)
     return dict(kind="bottom", front=front, back=back, region=None, detail=None)
 
 

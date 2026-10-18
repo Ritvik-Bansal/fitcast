@@ -102,8 +102,9 @@ class Smoother:
             bad = (jump > lim) & (self._frozen < self.max_freeze)
             # shoulder-width consistency: shoulders collapsing to a point (or exploding) in one frame is a
             # detector glitch, never a move -> both shoulders keep their previous positions
-            if track.ref_shoulder_width > 1.0:
-                r = float(track.shoulder_width) / float(track.ref_shoulder_width)
+            prev_sw = float(np.hypot(*(self._prev_xy[11] - self._prev_xy[12])))
+            if prev_sw > 1.0:
+                r = float(track.shoulder_width) / prev_sw          # frame to frame: a slow turn passes, a collapse does not
                 if (r < self.sw_ratio_min or r > self.sw_ratio_max) and self._frozen[11] < self.max_freeze:
                     bad[11] = bad[12] = True
             if bad.any():

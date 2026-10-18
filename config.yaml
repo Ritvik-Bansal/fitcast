@@ -103,7 +103,7 @@ smoothing:
   max_jump_sw_limbs: 0.9    # ... limbs this much (a swipe is ~0.2 per frame)
   max_freeze_frames: 12     # after this many frozen frames the new position is accepted (real fast move)
   max_jump_px_floor: 24     # the per-frame limit is never below this many pixels
-  sw_ratio_min: 0.55        # shoulder width below this fraction of the reference in a frame = glitch (shoulders frozen) ...
+  sw_ratio_min: 0.55        # shoulder width below this fraction of the previous frame's = glitch (shoulders frozen) ...
   sw_ratio_max: 1.6         # ... same above this
   vis_hold_frames: 10       # a joint seen above vis_hold_threshold stays usable this many frames after its score dips
   vis_hold_threshold: 0.5
@@ -122,6 +122,7 @@ renderer:
   waist_band_height_frac: 0.14
   side_min_width_frac: 0.85 # side view: torso quad is at least this wide (fraction of ref shoulder width); the mask clips it
   front_min_width_frac: 0.7 # front/back: torso quad never narrower than this fraction of the reference shoulder width
+  side_leg_width_frac: 0.55 # side view: pants drawn as one column this wide (fraction of shoulder width)
   bottom_knee_frac: 0.55    # where the bottoms texture splits thigh / shin (fraction of its height)
   waist_min_half_width_frac: 0.45
   feather_px: 4
