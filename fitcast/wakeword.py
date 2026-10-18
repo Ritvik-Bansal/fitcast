@@ -104,6 +104,7 @@ class WakeListener(threading.Thread):
         self._quit = threading.Event()
         self._proc: subprocess.Popen | None = None
         self.state = "idle"
+        self.mute_until = 0.0                                  # the booth's own voice must not wake it
 
     def stop(self) -> None:
         self._quit.set()
@@ -189,6 +190,9 @@ class WakeListener(threading.Thread):
             ring.append(data)
             self._hist.append(data)
             if self.state == "idle":
+                if time.perf_counter() < self.mute_until:
+                    rec.Reset()
+                    continue
                 final = rec.AcceptWaveform(data)
                 if final:
                     text = json.loads(rec.Result()).get("text", "")

@@ -648,6 +648,13 @@ class App:
                  res["n_body"], res["rms_body"], torso_px,
                  "" if which == "second" else " (T-pose again ~1 m closer or farther for depth tracking)")
 
+    def _say(self, text: str) -> None:
+        """Speak and keep the wake listener from hearing the booth itself."""
+        from fitcast.stylist import speak
+        dur = speak(text)
+        if self.wake is not None:
+            self.wake.mute_until = max(self.wake.mute_until, time.perf_counter() + dur)
+
     def _step_stylist(self, now: float) -> None:
         """Typed questions from the ask file; finished replies dress the person, speak and show the shopping list."""
         scfg = self.cfg["stylist"]
@@ -667,8 +674,7 @@ class App:
                     subprocess.Popen(["afplay", "-v", str(scfg.get("wake", {}).get("chime_volume", 4)), chime],
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if scfg.get("wake", {}).get("say_on_wake", ""):
-                    from fitcast.stylist import speak
-                    speak(str(scfg["wake"].get("say_on_wake")))
+                    self._say(str(scfg["wake"].get("say_on_wake")))
             elif kind == "request":
                 path, hint = payload
                 if path is None:
@@ -694,8 +700,7 @@ class App:
             log.info("stylist understood no request (%r); outfit unchanged", r.question)
             self.compositor.set_message(["Didn't catch that.", "Say Magic mirror, wait for the chime, then ask."], now, 6)
             if scfg.get("speak", True):
-                from fitcast.stylist import speak
-                speak("Sorry, I didn't catch that. Say magic mirror, then ask.")
+                self._say("Sorry, I didn't catch that. Please try again.")
             return
         self.set_pair(r.top_index, r.bottom_index, now)
         self.last_gesture_t = now
@@ -711,8 +716,7 @@ class App:
         log.info("stylist (%s, %.1f s): %s | %s | %s", r.model, r.latency_s, r.question, r.say,
                  "; ".join(f"{x['item']} @ {x['store']} ${x['price_usd']} {x['url']}" for x in r.shopping))
         if scfg.get("speak", True):
-            from fitcast.stylist import speak
-            speak(r.say)
+            self._say(r.say)
 
     def relearn_background(self) -> None:
         """Key b: forget the depth background and learn it again from the next N frames (step out of the beam)."""
@@ -797,8 +801,7 @@ class App:
                 lines = ["Added to cart"] + [f"{e['name']}" for e in added] + ["See the cart page"]
                 self.compositor.set_message(lines, now, 6)
                 if self.cfg.get("stylist", {}).get("speak", True):
-                    from fitcast.stylist import speak
-                    speak("Added to your cart")
+                    self._say("Added to your cart")
             elif ev == "calibrate":
                 self.run_self_calibration(track)
         self.sizing.update(track)

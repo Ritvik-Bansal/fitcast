@@ -200,7 +200,12 @@ class GeminiStylist:
             body["generationConfig"]["responseMimeType"] = "application/json"
         last = ""
         for model in self.models:
-            code, payload = _post(_API.format(model=model), body, self.key, self.timeout)
+            try:
+                code, payload = _post(_API.format(model=model), body, self.key, self.timeout)
+            except (TimeoutError, OSError) as e:            # slow model: try the next one instead of failing
+                last = f"{model}: {e}"
+                log.warning("stylist %s", last)
+                continue
             if code == 200:
                 cands = payload.get("candidates") or []
                 if not cands:
@@ -268,6 +273,10 @@ def _post(url: str, body: dict, key: str, timeout: float) -> tuple[int, dict | s
             return e.code, json.loads(raw)
         except ValueError:
             return e.code, raw[:200]
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, TimeoutError) or "timed out" in str(e.reason):
+            raise TimeoutError(str(e.reason)) from e
+        raise OSError(str(e.reason)) from e
 
 
 # -- microphone + speech (macOS, no dependencies) -----------------------------------------------
@@ -320,14 +329,17 @@ class Recorder:
         return None
 
 
-def speak(text: str, rate: int = 185) -> None:
-    """Read `text` aloud with macOS `say` without blocking (no-op when unavailable)."""
+def speak(text: str, rate: int = 185) -> float:
+    """Read `text` aloud with macOS `say` without blocking (no-op when unavailable). Returns the estimated
+    duration in seconds so the wake listener can ignore the booth's own voice."""
     if not text:
-        return
+        return 0.0
     try:
         subprocess.Popen(["say", "-r", str(rate), text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
         log.info("say not available; stylist reply: %s", text)
+        return 0.0
+    return 0.6 + len(text.split()) * 60.0 / rate
 
 
 # -- sharing the links --------------------------------------------------------------------------
