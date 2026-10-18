@@ -26,3 +26,5 @@ ios/*.xcodeproj/
 !assets/garments/_raw/
 assets/garments/_raw/*
 !assets/garments/_raw/sources.json
+
+secrets/

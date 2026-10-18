@@ -400,3 +400,18 @@ selfcal:                    # self-service calibration (T-pose or key t): discs 
   min_body_discs: 3
   debug_images: 6           # out/selfcal_disc_XX.jpg (lit | difference) for the first discs
   trigger_file: out/calibrate.now   # `touch` this file to start self-calibration remotely (same as key t)
+
+stylist:                    # optional Gemini outfit picker (needs network + a key; the demo is offline without it)
+  enabled: false            # or run with --stylist
+  key_file: secrets/gemini.key   # gitignored; GEMINI_API_KEY in the environment wins
+  models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.5-flash, gemini-3.1-flash-lite]   # tried in order on 404/429/503
+  timeout_s: 40
+  temperature: 0.4
+  grounding: false          # google_search tool for live shop links (needs quota)
+  speak: true               # macOS `say` reads the one-sentence answer
+  message_s: 30             # how long the answer + shopping list stays on the wall
+  record_key: v             # press once to start recording, again to send
+  record_device: ":0"       # ffmpeg avfoundation audio device (":0" = default microphone)
+  record_file: out/ask.wav
+  record_max_s: 12
+  ask_file: out/ask.txt     # write a typed question here to ask without a microphone

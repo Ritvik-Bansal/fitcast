@@ -136,3 +136,9 @@ Each milestone: what was run, what was observed.
   `assets/garments/SOURCES.md` (three photos are CC BY-SA: outfits 14, 15, 16, 21 - fine for the demo with attribution).
 - Mix-and-match: zone swipes (above the waist = top, below = bottoms), two wall strips (bottoms left, tops right),
   swipes only while standing still and one-handed.
+- Stylist (Gemini): `--stylist` or `stylist.enabled`; key in `secrets/gemini.key` (gitignored) or GEMINI_API_KEY.
+  Press `v` to talk (again to send; ffmpeg avfoundation mic) or write a question to `out/ask.txt`. Reply = one top +
+  one bottom from the catalogue (set live), one spoken sentence (macOS `say`) and 2-4 shopping suggestions shown in
+  the message band at the top of the beam. Verified: typed question 5-7 s, spoken question (synthesized speech) 7 s,
+  end-to-end on the test clip. Model `gemini-3.8-flash` (2.5 models closed to new keys); search grounding is over
+  quota on the free key, so prices are the model's estimates ("Prices approximate" on the wall).

@@ -20,6 +20,9 @@ class Compositor:
         self.W, self.H = size
         self.gallery_layer: np.ndarray | None = None
         self.rect_right: list[int] | None = None
+        self.rect_msg: list[int] | None = None
+        self.msg_lines: list[str] = []
+        self.msg_until = 0.0
         self.out = np.zeros((self.H, self.W, 3), np.uint8)
         self._lit = np.zeros((self.H, self.W), np.uint8)
         self._lit3 = np.zeros((self.H, self.W, 3), np.uint8)
@@ -55,6 +58,43 @@ class Compositor:
 
     def set_gallery_rect(self, rect: list[int] | tuple[int, int, int, int]) -> None:
         self.rect = [int(x) for x in rect]
+
+    def set_message_rect(self, rect: list[int] | tuple[int, int, int, int] | None) -> None:
+        """Where the stylist's answer is written (camera px, on the wall between the strips)."""
+        self.rect_msg = None if rect is None else [int(x) for x in rect]
+
+    def set_message(self, lines: list[str], now: float, duration_s: float) -> None:
+        """Show `lines` in the message panel until `now + duration_s` (empty list hides it)."""
+        self.msg_lines = [str(x) for x in lines][:6]
+        self.msg_until = now + float(duration_s)
+
+    def _draw_message(self, out: np.ndarray, track: TrackResult, now: float) -> None:
+        if self.rect_msg is None or not self.msg_lines or now > self.msg_until:
+            return
+        g = self.g
+        x0, y0, x1, y1 = self.rect_msg
+        x0, y0, x1, y1 = max(0, x0), max(0, y0), min(self.W, x1), min(self.H, y1)
+        if x1 - x0 < 60 or y1 - y0 < 30:
+            return
+        panel = out[y0:y1, x0:x1]
+        panel[:] = g["bg_color"]
+        fs = float(g["font_scale"])
+        accent = tuple(int(c) for c in g["accent_color"])
+        step = int(22 * fs / 0.55)
+        max_chars = max(8, int((x1 - x0) / (11 * fs / 0.55)))
+        y = int(18 * fs / 0.55)
+        for li, line in enumerate(self.msg_lines):
+            if y > (y1 - y0) - 4:
+                break
+            cv2.putText(panel, line[:max_chars], (8, y), cv2.FONT_HERSHEY_SIMPLEX, fs if li == 0 else fs * 0.85,
+                        accent if li == 0 else (235, 235, 235), 1, cv2.LINE_AA)
+            y += step
+        if track.ok:   # never light the person (the head is in this band when the beam top is low)
+            body = track.person_mask if track.person_mask is not None else track.clothes_mask
+            near = cv2.dilate(body[y0:y1, x0:x1], self.k_gap)
+            panel[near > 0] = 0
+            hx0, hy0, hx1, hy1 = track.head_box
+            panel[max(0, hy0 - y0):max(0, hy1 - y0), max(0, hx0 - x0):max(0, hx1 - x0)] = 0
 
     def set_gallery_rects(self, left: list[int] | tuple[int, int, int, int], right: list[int] | tuple[int, int, int, int] | None) -> None:
         """Two strips: bottoms in `left`, tops in `right` (None = single strip in `left` following the last swipe)."""
@@ -105,6 +145,7 @@ class Compositor:
             else:
                 self._draw_gallery(target, gallery, track, now, self.rect, "bottoms")
                 self._draw_gallery(target, gallery, track, now, self.rect_right, "tops")
+            self._draw_message(target, track, now)
 
         # SAFETY: head blackout is always the last operation on the lit frame (and on the gallery layer).
         x0, y0, x1, y1 = track.head_box

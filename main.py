@@ -57,6 +57,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--no-projector", action="store_true", help="debug window only (laptop-only development)")
     ap.add_argument("--no-realtime", action="store_true", help="video files: do not pace to native fps")
     ap.add_argument("--no-roi", action="store_true", help="track the whole camera frame, not just the projector footprint")
+    ap.add_argument("--stylist", action="store_true", help="Gemini outfit picker: key v = talk, or write out/ask.txt")
     ap.add_argument("--show-skeleton", action="store_true", help="also project the tracked skeleton (key k toggles)")
     ap.add_argument("--sensor", choices=["webcam", "iphone"], help="webcam (default) or the iPhone LiDAR sensor app")
     ap.add_argument("--sensor-host", help="iphone sensor: connect to this IP instead of USB (usbmux)")
@@ -128,7 +129,7 @@ class App:
         self._proj_cache: np.ndarray | None = None
         self._K_warned = False
         if self.calib.ok and getattr(self.calib.data, "gallery_rect", None) and self.sensor_kind != "iphone":
-            self.compositor.set_gallery_rects(*self._gallery_rects())
+            self._apply_layout()
         if self.calib.ok and tcfg.get("roi_from_calibration", True) and not args.no_roi and self.sensor_kind != "iphone":
             # only track inside the projector footprint (+margin): bystanders beside the rig are ignored
             c = self.calib.unproject_points(np.array([[0, 0], [self.calib.projector_size[0], 0],
@@ -177,6 +178,17 @@ class App:
         self.pump_every = max(1, int(cfg["display"].get("pump_every_n", 1)))
         self._torso_ema: float | None = None
         self._proj_person: np.ndarray | None = None
+        self.stylist = None
+        self.recorder = None
+        scfg = cfg.get("stylist", {})
+        if (args.stylist or scfg.get("enabled", False)) and self.sensor_kind != "iphone":
+            from fitcast.stylist import GeminiStylist, Recorder, load_api_key
+            key = load_api_key(scfg)
+            if key:
+                self.stylist = GeminiStylist(scfg, outfits, key)
+                self.recorder = Recorder(scfg)
+                log.info("stylist on: press %s to talk (again to send) or write a question to %s",
+                         scfg.get("record_key", "v"), scfg.get("ask_file", "out/ask.txt"))
         if self.sensor_kind != "iphone":
             self.compositor.use_separate_gallery_layer(True)
         self.depth_shift = (0.0, 0.0)
@@ -207,6 +219,23 @@ class App:
         left = [int(gx0 + mx), int(gy0 + my), int(gx0 + mx) + strip_w, int(gy1 - my)]
         right = [int(gx1 - mx) - strip_w, int(gy0 + my), int(gx1 - mx), int(gy1 - my)]
         return left, right
+
+    def _apply_layout(self) -> None:
+        """Strips on both sides of the beam and the stylist message band at the top between them."""
+        left, right = self._gallery_rects()
+        self.compositor.set_gallery_rects(left, right)
+        band_h = int(0.2 * (left[3] - left[1]))
+        self.compositor.set_message_rect([left[2] + 8, left[1], right[0] - 8, left[1] + band_h])
+
+    def set_pair(self, top: int | None, bottom: int | None, now: float) -> None:
+        """Stylist pick: a top and a bottom by catalogue index (None keeps the current one)."""
+        g = self.gallery
+        if top is not None:
+            g.prev_index, g.index = g.index, top % len(g.outfits)
+        if bottom is not None:
+            g.bottom_index = -1 if bottom == g.index else bottom % len(g.outfits)
+        g.strip, g.changed_at = "outfits", now
+        log.info("stylist outfit -> %s", g.current.name)
 
     def set_outfit(self, idx: int, now: float) -> None:
         """Whole outfit (keys / auto-cycle): bottoms follow the top again."""
@@ -250,6 +279,15 @@ class App:
             self.last_gesture_t = now
         elif k == ord("m"):
             self.tracker.cycle_mask_mode()
+        elif self.stylist is not None and k == ord(str(self.cfg["stylist"].get("record_key", "v"))[0]):
+            if self.recorder.recording:
+                path = self.recorder.stop()
+                if path is not None and self.stylist.ask_audio(path):
+                    self.compositor.set_message(["Stylist is thinking..."], now, 30)
+                else:
+                    self.compositor.set_message(["Could not hear you. Press v and speak."], now, 6)
+            elif self.recorder.start():
+                self.compositor.set_message(["Listening... press v again to send"], now, 20)
         elif k == ord("d"):
             self.show_overlay = not self.show_overlay
         elif k == ord("f"):
@@ -275,7 +313,7 @@ class App:
         elif k == ord("r"):
             if self.calib.load(self.args.calibration, allow_simulated=getattr(self.source, "is_file", False)):
                 if self.calib.data.gallery_rect:
-                    self.compositor.set_gallery_rects(*self._gallery_rects())
+                    self._apply_layout()
                 log.info("calibration reloaded")
         return True
 
@@ -516,12 +554,43 @@ class App:
         self.calib.data.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + f" selfcal({which})"
         left, right = self._gallery_rects()
         self.calib.data.gallery_rect = left
-        self.compositor.set_gallery_rects(left, right)
+        self._apply_layout()
         self.calib.save()
         self.tracker.reset_reference()
         log.info("self-calibration saved as the %s plane: %d body discs, rms %.2f px, torso %.0f px%s", which,
                  res["n_body"], res["rms_body"], torso_px,
                  "" if which == "second" else " (T-pose again ~1 m closer or farther for depth tracking)")
+
+    def _step_stylist(self, now: float) -> None:
+        """Typed questions from the ask file; finished replies dress the person, speak and show the shopping list."""
+        scfg = self.cfg["stylist"]
+        ask = Path(scfg.get("ask_file", "out/ask.txt"))
+        if self.frames % 10 == 0 and ask.exists():
+            q = ask.read_text().strip()
+            ask.unlink(missing_ok=True)
+            if q and self.stylist.ask_text(q):
+                log.info("stylist question: %s", q)
+                self.compositor.set_message([q[:70], "Stylist is thinking..."], now, 30)
+        r = self.stylist.poll()
+        if r is None:
+            return
+        if r.error:
+            log.error("stylist failed: %s", r.error)
+            self.compositor.set_message(["Stylist unavailable", r.error[:60]], now, 8)
+            return
+        self.set_pair(r.top_index, r.bottom_index, now)
+        self.last_gesture_t = now
+        lines = [r.question[:70], self.gallery.current.name]
+        for sh in r.shopping:
+            price = f" ~${sh['price_usd']}" if sh.get("price_usd") not in (None, "") else ""
+            lines.append(f"{sh['item']} - {sh['store']}{price}")
+        lines.append("Prices approximate")
+        self.compositor.set_message(lines, now, float(scfg.get("message_s", 30)))
+        log.info("stylist (%s, %.1f s): %s | %s | %s", r.model, r.latency_s, r.question, r.say,
+                 "; ".join(f"{x['item']} @ {x['store']} ${x['price_usd']} {x['url']}" for x in r.shopping))
+        if scfg.get("speak", True):
+            from fitcast.stylist import speak
+            speak(r.say)
 
     def relearn_background(self) -> None:
         """Key b: forget the depth background and learn it again from the next N frames (step out of the beam)."""
@@ -563,6 +632,8 @@ class App:
         if self._want_selfcal and track.ok:
             self._want_selfcal = False
             self.run_self_calibration(track)
+        if self.stylist is not None:
+            self._step_stylist(now)
         for ev in self.gestures.update(track):
             self.gesture_log.append((now, ev))
             log.info("gesture: %s", ev)

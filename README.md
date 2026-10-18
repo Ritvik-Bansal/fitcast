@@ -224,3 +224,19 @@ each camera pixel through its true 3D position (`fitcast/render3d.py`), after a 
 4. Person on the mark: check collar and hem, swipe once each way, turn once. `k` shows the skeleton on the body
    if anything looks off; `[`/`]` nudges; `b` relearns the background if someone walked through.
 5. Fallback if the phone misbehaves: `main.py --sensor webcam` with the 2D calibration (`calibrate.py --auto`, `--refine`).
+
+## Stylist (Gemini, optional)
+
+Ask for an outfit in plain language and the booth dresses you with the closest catalogue pieces, says one sentence and
+lists where to buy similar items.
+
+```
+echo "AIza..." > secrets/gemini.key            # or export GEMINI_API_KEY=...
+.venv/bin/python main.py --stylist
+# press v, speak ("interview outfit under 80 dollars"), press v again
+# or: echo "black jacket and blue jeans" > out/ask.txt
+.venv/bin/python scripts/stylist_cli.py "casual plaid shirt look"      # test without camera / projector
+```
+Settings live under `stylist:` in `config.yaml` (models, microphone device, speech, message time). The demo itself stays
+offline; only this feature talks to the network. Shopping prices are model estimates unless `grounding: true` and the
+key has Google Search quota.
