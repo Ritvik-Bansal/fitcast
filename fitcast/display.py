@@ -271,6 +271,27 @@ class Display:
 # ---------------------------------------------------------------------------------------------
 # Debug overlay
 # ---------------------------------------------------------------------------------------------
+def draw_skeleton_for_projector(comp: np.ndarray, track: TrackResult, min_vis: float = 0.5) -> np.ndarray:
+    """Draw body bones/joints (never the head) onto the projector composite, for checking where the system
+    thinks the body is. Anything inside the head box is re-blacked afterwards (safety rule stays last)."""
+    if not track.ok:
+        return comp
+    j, v = track.joints, track.visibility
+    x0, y0, x1, y1 = track.head_box
+    for a, b in BONES:
+        if v[a] >= min_vis and v[b] >= min_vis:
+            cv2.line(comp, (int(j[a, 0]), int(j[a, 1])), (int(j[b, 0]), int(j[b, 1])), (255, 255, 255), 3, cv2.LINE_AA)
+    for i in range(11, 33):          # body joints only
+        if v[i] >= min_vis:
+            cv2.circle(comp, (int(j[i, 0]), int(j[i, 1])), 7, (0, 255, 0), -1, cv2.LINE_AA)
+    for i, name in ((L_SHOULDER, "L sh"), (R_SHOULDER, "R sh"), (L_HIP, "L hip"), (R_HIP, "R hip")):
+        if v[i] >= min_vis:
+            cv2.putText(comp, name, (int(j[i, 0]) + 10, int(j[i, 1]) - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1, cv2.LINE_AA)
+    if x1 > x0 and y1 > y0:
+        comp[y0:y1, x0:x1] = 0
+    return comp
+
+
 def draw_debug(frame: np.ndarray, track: TrackResult, info: dict, min_vis: float = 0.5,
                composite: np.ndarray | None = None, show_overlay: bool = True, mask_tint: bool = True) -> np.ndarray:
     """Camera frame + skeleton, mask outline/tint, head box and status text. Optionally side-by-side with the composite."""

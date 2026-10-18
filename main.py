@@ -22,7 +22,7 @@ import yaml
 from fitcast.calibration import Calibration
 from fitcast.capture import FrameSource, list_cameras
 from fitcast.compositor import Compositor
-from fitcast.display import Display, draw_debug
+from fitcast.display import Display, draw_debug, draw_skeleton_for_projector
 from fitcast.garments import load_outfits
 from fitcast.gestures import GestureDetector
 from fitcast.renderer import Renderer
@@ -57,6 +57,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--no-projector", action="store_true", help="debug window only (laptop-only development)")
     ap.add_argument("--no-realtime", action="store_true", help="video files: do not pace to native fps")
     ap.add_argument("--no-roi", action="store_true", help="track the whole camera frame, not just the projector footprint")
+    ap.add_argument("--show-skeleton", action="store_true", help="also project the tracked skeleton (key k toggles)")
     ap.add_argument("--loop", action="store_true", help="headless: keep looping the video file (soak tests)")
     ap.add_argument("--log-level", default=None)
     return ap.parse_args(argv)
@@ -115,6 +116,7 @@ class App:
         proj = (int(cfg["calibration"]["projector_width"]), int(cfg["calibration"]["projector_height"]))
         self.display = Display(cfg["display"], proj, (args.projector_x, args.projector_y), headless=args.no_window)
         self.show_overlay = True
+        self.show_skeleton = bool(args.show_skeleton)
         self.show_debug = bool(cfg["display"]["show_debug"])
         self.writer: cv2.VideoWriter | None = None
         self.fps = 0.0
@@ -171,6 +173,9 @@ class App:
             self.sizing.reset()
         elif k == ord("g"):
             self.gallery.visible = not self.gallery.visible
+        elif k == ord("k"):
+            self.show_skeleton = not self.show_skeleton
+            log.info("skeleton on projector: %s", self.show_skeleton)
         elif k in (ord("["), ord("]")):
             self.renderer.vertical_offset_frac += -0.02 if k == ord("[") else 0.02
             log.info("renderer.vertical_offset_frac = %.2f (shoulder widths; put this in config.yaml to keep it)",
@@ -271,6 +276,8 @@ class App:
         t1 = time.perf_counter()
         rgba = self.renderer.draw(track, self.gallery.current)
         comp = self.compositor.compose(rgba, track, self.gallery, now)
+        if self.show_skeleton:
+            draw_skeleton_for_projector(comp, track, self.tracker.min_vis)
         if track.ok:
             from fitcast import geometry as _geo
             t_px = _geo.torso_length(track.joints)
