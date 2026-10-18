@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import subprocess
 import time
 import queue
 from pathlib import Path
