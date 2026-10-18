@@ -19,6 +19,7 @@ class Compositor:
         self.cfg = cfg
         self.W, self.H = size
         self.gallery_layer: np.ndarray | None = None
+        self.rect_right: list[int] | None = None
         self.out = np.zeros((self.H, self.W, 3), np.uint8)
         self._lit = np.zeros((self.H, self.W), np.uint8)
         self._lit3 = np.zeros((self.H, self.W, 3), np.uint8)
@@ -54,6 +55,11 @@ class Compositor:
 
     def set_gallery_rect(self, rect: list[int] | tuple[int, int, int, int]) -> None:
         self.rect = [int(x) for x in rect]
+
+    def set_gallery_rects(self, left: list[int] | tuple[int, int, int, int], right: list[int] | tuple[int, int, int, int] | None) -> None:
+        """Two strips: bottoms in `left`, tops in `right` (None = single strip in `left` following the last swipe)."""
+        self.rect = [int(x) for x in left]
+        self.rect_right = None if right is None else [int(x) for x in right]
 
     # -- main ----------------------------------------------------------------------------------
     def compose(self, rgba: np.ndarray, track: TrackResult, gallery: GalleryState, now: float | None = None
@@ -93,7 +99,12 @@ class Compositor:
         if self.gallery_enabled and gallery.visible and gallery.outfits:
             # the gallery lives on the wall: with `gallery_layer` set it is returned separately so the caller can warp
             # it with the wall-distance mapping while the garments use the person's distance
-            self._draw_gallery(out if self.gallery_layer is None else self.gallery_layer, gallery, track, now)
+            target = out if self.gallery_layer is None else self.gallery_layer
+            if self.rect_right is None:
+                self._draw_gallery(target, gallery, track, now)
+            else:
+                self._draw_gallery(target, gallery, track, now, self.rect, "bottoms")
+                self._draw_gallery(target, gallery, track, now, self.rect_right, "tops")
 
         # SAFETY: head blackout is always the last operation on the lit frame (and on the gallery layer).
         x0, y0, x1, y1 = track.head_box
@@ -107,12 +118,13 @@ class Compositor:
         return out
 
     # -- gallery -------------------------------------------------------------------------------
-    def _thumb(self, gallery: GalleryState, idx: int, size: int) -> np.ndarray:
-        key = (gallery.strip, idx, size)
+    def _thumb(self, gallery: GalleryState, idx: int, size: int, strip: str | None = None) -> np.ndarray:
+        strip = gallery.strip if strip is None else strip
+        key = (strip, idx, size)
         t = self._thumb_cache.get(key)
         if t is None:
             o = gallery.outfits[idx]
-            part = o.top_front if gallery.strip == "tops" else o.bottom_front if gallery.strip == "bottoms" else None
+            part = o.top_front if strip == "tops" else o.bottom_front if strip == "bottoms" else None
             if part is None:
                 t = cv2.resize(o.thumb, (size, size), interpolation=cv2.INTER_AREA)
             else:
@@ -131,9 +143,11 @@ class Compositor:
             self._thumb_cache[key] = t
         return t
 
-    def _draw_gallery(self, out: np.ndarray, gal: GalleryState, track: TrackResult, now: float) -> None:
+    def _draw_gallery(self, out: np.ndarray, gal: GalleryState, track: TrackResult, now: float,
+                      rect: list[int] | None = None, strip: str | None = None) -> None:
         g = self.g
-        x0, y0, x1, y1 = self.rect
+        x0, y0, x1, y1 = self.rect if rect is None else rect
+        strip = gal.strip if strip is None else strip
         x0, y0 = max(0, x0), max(0, y0)
         x1, y1 = min(self.W, x1), min(self.H, y1)
         if x1 - x0 < 40 or y1 - y0 < 40:
@@ -141,18 +155,22 @@ class Compositor:
         panel = out[y0:y1, x0:x1]
         panel[:] = g["bg_color"]
         pw, ph = x1 - x0, y1 - y0
-        items = gal.bottom_cycle if (gal.strip == "bottoms" and gal.bottom_cycle) else list(range(len(gal.outfits)))
+        items = gal.bottom_cycle if (strip == "bottoms" and gal.bottom_cycle) else list(range(len(gal.outfits)))
         n = len(items)
         ts, scale = int(g["thumb_size"]), float(g["current_scale"])
         big = int(ts * scale)
         vertical = ph >= pw
         spacing = int(ts * 1.25)
         # animated virtual index (the strip follows whichever part was swiped last)
-        cur = gal.bottom_index if (gal.strip == "bottoms" and gal.bottom_index >= 0) else gal.index
-        prev = gal.prev_index
-        if gal.strip == "bottoms" and gal.bottom_cycle:        # positions within the distinct-bottoms cycle
-            cur = items.index(cur) if cur in items else 0
-            prev = items.index(prev) if prev in items else cur
+        if strip == "bottoms":
+            cur = gal.bottom_index if gal.bottom_index >= 0 else gal.index
+            prev = gal.prev_index if gal.strip == "bottoms" else cur        # animate only the strip that was swiped
+            if gal.bottom_cycle:                                           # positions within the distinct-bottoms cycle
+                cur = items.index(cur) if cur in items else 0
+                prev = items.index(prev) if prev in items else cur
+        else:
+            cur = gal.index
+            prev = gal.prev_index if gal.strip != "bottoms" else cur
         t = _ease((now - gal.changed_at) / (float(g["anim_ms"]) / 1000.0)) if g["anim_ms"] > 0 else 1.0
         d = cur - prev
         if abs(d) > n / 2:  # wrap-around: take the short way
@@ -179,13 +197,18 @@ class Compositor:
             tx1, ty1 = tx0 + s, ty0 + s
             if tx0 < 0 or ty0 < 0 or tx1 > pw or ty1 > ph - text_h:
                 continue
-            panel[ty0:ty1, tx0:tx1] = self._thumb(gal, items[i], s)
+            panel[ty0:ty1, tx0:tx1] = self._thumb(gal, items[i], s, strip)
             if is_cur:
                 cv2.rectangle(panel, (tx0 - 3, ty0 - 3), (tx1 + 2, ty1 + 2), accent, 3)
         fs = float(g["font_scale"])
-        if gal.strip != "outfits":
-            cv2.putText(panel, gal.strip.upper(), (8, int(22 * fs / 0.55)), cv2.FONT_HERSHEY_SIMPLEX, fs * 0.8, accent, 1, cv2.LINE_AA)
-        lines = [gal.current.name, gal.size_text, gal.measure_text, "Size is an estimate"]
+        if strip != "outfits":
+            cv2.putText(panel, strip.upper(), (8, int(22 * fs / 0.55)), cv2.FONT_HERSHEY_SIMPLEX, fs * 0.8, accent, 1, cv2.LINE_AA)
+        if strip == "tops":
+            lines = [gal.current.name.split(" + ")[0], gal.size_text, gal.measure_text, "Size is an estimate"]
+        elif strip == "bottoms":
+            lines = [gal.current.name.split(" + ")[-1], "", "", ""]
+        else:
+            lines = [gal.current.name, gal.size_text, gal.measure_text, "Size is an estimate"]
         y = ph - text_h + int(18 * fs / 0.55)
         for li, line in enumerate(lines):
             if not line:

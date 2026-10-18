@@ -128,7 +128,7 @@ class App:
         self._proj_cache: np.ndarray | None = None
         self._K_warned = False
         if self.calib.ok and getattr(self.calib.data, "gallery_rect", None) and self.sensor_kind != "iphone":
-            self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
+            self.compositor.set_gallery_rects(*self._gallery_rects())
         if self.calib.ok and tcfg.get("roi_from_calibration", True) and not args.no_roi and self.sensor_kind != "iphone":
             # only track inside the projector footprint (+margin): bystanders beside the rig are ignored
             c = self.calib.unproject_points(np.array([[0, 0], [self.calib.projector_size[0], 0],
@@ -193,6 +193,21 @@ class App:
         self._lat_ema = float(cfg["smoothing"]["predict_ms"])
 
     # -- outfit control -----------------------------------------------------------------------
+    def _gallery_rects(self) -> tuple[list[int], list[int]]:
+        """Bottoms strip on the left band and tops strip on the right band of the projector footprint (camera px),
+        so both always land inside the beam."""
+        pw, ph = self.calib.projector_size
+        c = self.calib.unproject_points(np.array([[0, 0], [pw, 0], [pw, ph], [0, ph]], np.float64))
+        gx0, gy0 = max(c[0][0], c[3][0]), max(c[0][1], c[1][1])
+        gx1, gy1 = min(c[1][0], c[2][0]), min(c[2][1], c[3][1])
+        fw, fh = gx1 - gx0, gy1 - gy0
+        gcfg = self.cfg["compositor"]["gallery"]
+        strip_w = max(int(gcfg.get("fp_w_frac", 0.12) * fw), int(gcfg["thumb_size"] * gcfg["current_scale"]) + 24)
+        mx, my = gcfg.get("fp_x_frac", 0.03) * fw, gcfg.get("fp_y_frac", 0.08) * fh
+        left = [int(gx0 + mx), int(gy0 + my), int(gx0 + mx) + strip_w, int(gy1 - my)]
+        right = [int(gx1 - mx) - strip_w, int(gy0 + my), int(gx1 - mx), int(gy1 - my)]
+        return left, right
+
     def set_outfit(self, idx: int, now: float) -> None:
         """Whole outfit (keys / auto-cycle): bottoms follow the top again."""
         g = self.gallery
@@ -260,7 +275,7 @@ class App:
         elif k == ord("r"):
             if self.calib.load(self.args.calibration, allow_simulated=getattr(self.source, "is_file", False)):
                 if self.calib.data.gallery_rect:
-                    self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
+                    self.compositor.set_gallery_rects(*self._gallery_rects())
                 log.info("calibration reloaded")
         return True
 
@@ -499,18 +514,9 @@ class App:
         self.calib.data.reproj_error_px = float(res["rms_body"] if res["rms_body"] is not None else 0.0)
         self.calib.data.verified = True
         self.calib.data.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + f" selfcal({which})"
-        # gallery strip: left band of the projector footprint (camera space), so it is always inside the beam
-        pw, ph = self.calib.projector_size
-        c = self.calib.unproject_points(np.array([[0, 0], [pw, 0], [pw, ph], [0, ph]], np.float64))
-        gx0, gy0 = max(c[0][0], c[3][0]), max(c[0][1], c[1][1])
-        gx1, gy1 = min(c[1][0], c[2][0]), min(c[2][1], c[3][1])
-        fw, fh = gx1 - gx0, gy1 - gy0
-        gcfg = self.cfg["compositor"]["gallery"]
-        strip_w = max(int(gcfg.get("fp_w_frac", 0.12) * fw), int(gcfg["thumb_size"] * gcfg["current_scale"]) + 24)
-        self.calib.data.gallery_rect = [int(gx0 + gcfg.get("fp_x_frac", 0.03) * fw), int(gy0 + gcfg.get("fp_y_frac", 0.08) * fh),
-                                        int(gx0 + gcfg.get("fp_x_frac", 0.03) * fw) + strip_w,
-                                        int(gy1 - gcfg.get("fp_y_frac", 0.08) * fh)]
-        self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
+        left, right = self._gallery_rects()
+        self.calib.data.gallery_rect = left
+        self.compositor.set_gallery_rects(left, right)
         self.calib.save()
         self.tracker.reset_reference()
         log.info("self-calibration saved as the %s plane: %d body discs, rms %.2f px, torso %.0f px%s", which,
