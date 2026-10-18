@@ -56,20 +56,17 @@ def box_erode(src: np.ndarray, k: tuple[int, int], dst: np.ndarray, tmp: np.ndar
 class FacingClassifier:
     """front / back / side from shoulder order and normalised shoulder width, with hysteresis.
 
-    Two references are kept: `ref_norm` (shoulder width / torso length, used whenever both hips are
-    visible, distance-invariant) and `ref_px` (raw px, used when the hips are out of frame). Each is a
-    running max captured over its own warm-up, then updated slowly; a width more than `ref_jump_frac`
-    above the reference is adopted immediately (a session that started side-on).
+    The frontal reference is the MAX width over a sliding window of `ref_window_frames` (self-healing:
+    a bystander walking past the lens or a bad first second expires instead of poisoning the session).
+    Two widths are tracked: normalised by torso length when both hips are inside the frame (distance
+    invariant), raw px otherwise; each has its own window.
     """
 
     def __init__(self, cfg: dict) -> None:
         self.cfg = cfg
         self.side_ratio = float(cfg["side_ratio"])
         self.hold = int(cfg["hold_frames"])
-        self.rate = float(cfg["ref_update_rate"])
-        self.decay = float(cfg["ref_decay_rate"])
-        self.warmup = int(cfg["ref_warmup_frames"])
-        self.jump = float(cfg["ref_jump_frac"])
+        self.window = int(cfg["ref_window_frames"])
         self.face_thr = float(cfg["face_vis_back_threshold"])
         self.reset()
 
@@ -77,33 +74,28 @@ class FacingClassifier:
         self.state = "front"
         self._cand = "front"
         self._count = 0
+        self._ring_norm = np.zeros(self.window, np.float32)
+        self._ring_px = np.zeros(self.window, np.float32)
+        self._i_norm = 0
+        self._i_px = 0
         self.ref_norm = 0.0
         self.ref_px = 0.0
-        self._n_norm = 0
-        self._n_px = 0
         self.ratio = 1.0
 
-    def _advance(self, ref: float, n: int, width: float) -> float:
-        if ref <= 0.0 or n <= self.warmup or width > ref * self.jump:
-            return max(ref, width)
-        if width > ref:
-            return ref + self.rate * (width - ref)
-        if self.state != "side":
-            return ref - self.decay * (ref - width)
-        return ref
-
-    def update(self, joints: np.ndarray, vis: np.ndarray, min_vis: float) -> str:
+    def update(self, joints: np.ndarray, vis: np.ndarray, min_vis: float, hips_in_frame: bool = True) -> str:
         """Feed one frame of (33,3) joints + visibility; returns the (hysteresis-filtered) state."""
         ls, rs = joints[L_SHOULDER, :2], joints[R_SHOULDER, :2]
         sw = float(np.hypot(*(ls - rs)))
-        hips_ok = vis[L_HIP] >= min_vis and vis[R_HIP] >= min_vis
-        self._n_px += 1
-        self.ref_px = self._advance(self.ref_px, self._n_px, sw)
+        hips_ok = hips_in_frame and vis[L_HIP] >= min_vis and vis[R_HIP] >= min_vis
+        self._ring_px[self._i_px % self.window] = sw
+        self._i_px += 1
+        self.ref_px = float(self._ring_px[: min(self._i_px, self.window)].max())
         if hips_ok:
             norm = geo.torso_length(joints)
             width = sw / norm if norm > 1e-3 else sw
-            self._n_norm += 1
-            self.ref_norm = self._advance(self.ref_norm, self._n_norm, width)
+            self._ring_norm[self._i_norm % self.window] = width
+            self._i_norm += 1
+            self.ref_norm = float(self._ring_norm[: min(self._i_norm, self.window)].max())
             ref = self.ref_norm
         else:
             width, ref = sw, self.ref_px
@@ -460,6 +452,7 @@ class Tracker:
         # zero visibility for landmarks outside the frame (knees below the frame still report 0.6+)
         inside = ((joints[:, 0] >= self.margin) & (joints[:, 0] <= self.W - self.margin) &
                   (joints[:, 1] >= self.margin) & (joints[:, 1] <= self.H - self.margin))
+        hips_in_frame = bool(inside[L_HIP] and inside[R_HIP])
         inside[[L_HIP, R_HIP]] = True      # hips off-frame still anchor the torso quad (clipped by the frame)
         vis = np.where(inside, vis, 0.0).astype(np.float32)
 
@@ -482,7 +475,7 @@ class Tracker:
         t2 = time.perf_counter()
 
         sw = geo.shoulder_width(joints)
-        facing = self.facing.update(joints, vis, self.min_vis)
+        facing = self.facing.update(joints, vis, self.min_vis, hips_in_frame)
         ref_px = self.facing.ref_px or sw
         sw_for_size = max(sw, self.side_width_floor * ref_px)
 

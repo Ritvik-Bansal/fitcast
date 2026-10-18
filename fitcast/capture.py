@@ -16,10 +16,51 @@ _INTERP = {"area": cv2.INTER_AREA, "linear": cv2.INTER_LINEAR}
 
 
 def parse_source(s: str | int) -> int | str:
-    """'0' -> 0 (camera index), anything else -> path string."""
+    """'0' -> 0 (camera index), 'auto' -> first camera that streams non-black frames, else a path string."""
     if isinstance(s, int):
         return s
-    return int(s) if str(s).strip().isdigit() else str(s)
+    s = str(s).strip()
+    if s == "auto":
+        return pick_camera()
+    if s.lower().startswith("name:"):
+        return camera_index_by_name(s[5:])
+    return int(s) if s.isdigit() else s
+
+
+def camera_index_by_name(substring: str) -> int:
+    """OpenCV index of the AVFoundation video device whose name contains `substring` (case-insensitive).
+    OpenCV's AVFoundation backend enumerates devices in the same order as AVCaptureDevice."""
+    try:
+        import AVFoundation as AV  # type: ignore
+    except Exception as e:  # pragma: no cover
+        raise RuntimeError(f"camera by name needs pyobjc-framework-AVFoundation ({e}); use a numeric --source") from e
+    names = [str(d.localizedName()) for d in AV.AVCaptureDevice.devicesWithMediaType_(AV.AVMediaTypeVideo)]
+    for i, n in enumerate(names):
+        if substring.lower() in n.lower():
+            log.info("camera by name %r -> index %d (%s); all devices: %s", substring, i, n, names)
+            return i
+    raise RuntimeError(f"No camera named like {substring!r}. Devices: {names}")
+
+
+def pick_camera(max_index: int = 4, probe_s: float = 1.5, min_brightness: float = 5.0) -> int:
+    """First camera index that delivers non-black frames (an idle/locked Continuity Camera opens fine but
+    streams black or nothing, and the built-in camera's index moves when the iPhone comes and goes)."""
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i)
+        if not cap.isOpened():
+            continue
+        t0 = time.perf_counter()
+        last = None
+        while time.perf_counter() - t0 < probe_s:
+            ok, f = cap.read()
+            if ok:
+                last = f
+        cap.release()
+        if last is not None and float(last.mean()) > min_brightness:
+            log.info("camera auto-select: index %d streams (mean brightness %.0f)", i, float(last.mean()))
+            return i
+        log.info("camera auto-select: index %d skipped (%s)", i, "no frames" if last is None else "black frames")
+    raise RuntimeError("No camera delivers frames. Unlock/wake the iPhone or check Camera permission for the terminal app.")
 
 
 def list_cameras(max_index: int = 5) -> list[str]:
@@ -63,7 +104,8 @@ class FrameSource:
     def __init__(self, cfg: dict, source: int | str | None = None, sync: bool = False) -> None:
         self.cfg = cfg
         self.sync = sync        # True: no thread, read() decodes the next frame synchronously (offline review runs)
-        self.source = parse_source(cfg["source"] if source is None else source)
+        self.source_spec = cfg["source"] if source is None else source   # keep 'auto' so reopen() can re-pick
+        self.source = parse_source(self.source_spec)
         self.size = (int(cfg["width"]), int(cfg["height"]))
         self.interp = _INTERP[cfg.get("resize_interpolation", "area")]
         self.is_file = isinstance(self.source, str)
@@ -112,6 +154,27 @@ class FrameSource:
             self._thread.join(timeout=2.0)
         if self.cap is not None:
             self.cap.release()
+
+    def reopen(self) -> bool:
+        """Camera stopped delivering: release it, re-resolve the source ('auto' re-probes) and restart the thread."""
+        log.warning("reopening camera source %r", self.source_spec)
+        self.stop()
+        try:
+            self.source = parse_source(self.source_spec)
+            self.cap = None
+            self.open()
+        except RuntimeError as e:
+            log.error("reopen failed: %s", e)
+            return False
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="capture", daemon=True)
+        if not self.sync:
+            self._thread.start()
+        return True
+
+    @property
+    def alive(self) -> bool:
+        return self.sync or self._thread.is_alive()
 
     # -- data --------------------------------------------------------------
     def read(self) -> tuple[np.ndarray, float, int] | None:

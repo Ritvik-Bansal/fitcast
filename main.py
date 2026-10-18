@@ -122,6 +122,8 @@ class App:
         self._stale = False
         self.stale_s = float(cfg["capture"]["stale_ms"]) / 1000.0
         self.stall_exit_s = float(cfg["capture"]["stall_exit_s"])
+        self.reopen_s = float(cfg["capture"]["reopen_s"])
+        self._last_reopen = 0.0
         self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
         self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
         self._lat_ema = float(cfg["smoothing"]["predict_ms"])
@@ -171,7 +173,7 @@ class App:
         self.source.start()
         if not a.no_window:
             if not a.no_projector:
-                self.display.open_projector(fullscreen=a.demo)
+                self.display.open_projector(fullscreen=a.demo or self.display.second is not None)
             if self.show_debug:
                 self.display.open_debug()
         if a.record:
@@ -197,6 +199,11 @@ class App:
                             log.error("no new camera frame for %.1f s: projector blanked", age)
                             self._stale = True
                         self.display.show_projector(self._black)
+                    if age > self.reopen_s and now - self._last_reopen > self.reopen_s:
+                        self._last_reopen = now
+                        if self.source.reopen():
+                            last_seq = -1
+                            t_start = now          # restart the stall clock on a successful reopen
                     if age > self.stall_exit_s:
                         log.error("camera stalled for %.0f s; exiting. Check the cable / Continuity Camera and restart.", age)
                         break
@@ -268,12 +275,12 @@ class App:
                     "fallback": self.tracker.fallback_active, "outfit": self.gallery.current.name,
                     "calib": f"ok {self.calib.data.reproj_error_px:.1f}px" if self.calib.ok else "MISSING",
                     "extra": f"frame {self.frames}"}
+            want_comp = self.writer is not None or bool(self.cfg["display"].get("debug_show_composite", False))
             dbg = draw_debug(frame, track, info, self.tracker.min_vis,
-                             composite=comp if self.writer is not None else None, show_overlay=self.show_overlay)
+                             composite=comp if want_comp else None, show_overlay=self.show_overlay)
             if self.writer is not None:
                 self.writer.write(dbg)
-                dbg = dbg[:, : self.size[0]]
-            if self.show_debug and not self.args.no_window:
+            if self.show_debug and not self.args.no_window and self.frames % int(self.cfg["display"]["debug_every_n"]) == 0:
                 s = float(self.cfg["display"]["debug_scale"])
                 if s != 1.0:
                     dbg = cv2.resize(dbg, None, fx=s, fy=s)

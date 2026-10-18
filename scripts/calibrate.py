@@ -85,7 +85,8 @@ class LiveRig:
         cap_cfg, disp = config["capture"], config["display"]
         self.cam_size = (int(cap_cfg["width"]), int(cap_cfg["height"]))
         self.interp = {"area": cv2.INTER_AREA, "linear": cv2.INTER_LINEAR}[cap_cfg["resize_interpolation"]]
-        src = int(source) if str(source).isdigit() else source
+        from fitcast.capture import parse_source
+        src = parse_source(source)
         self.cap = cv2.VideoCapture(src)
         if not self.cap.isOpened():
             raise RuntimeError(f"cannot open camera {source!r}. Fix: check --source; on macOS allow "
@@ -313,11 +314,29 @@ def live_session(rig: LiveRig, config: dict, out: str, auto: bool = False) -> No
     # (c) detect, confirm, or click by hand
     cam = detect_markers(lit, dark, cfg, len(pts), rows)
     _dump_debug(lit, dark, cam, "out/calib_debug.jpg")
+    proj_pts = pts
     if auto:
-        if cam is None:
-            raise RuntimeError("marker detection failed (see out/calib_debug.jpg): dim the room, check the "
-                               "projector is on the second display, or run without --auto and click the markers")
-        print(f"detected {len(cam)} markers automatically (out/calib_debug.jpg)")
+        if True:
+            # robust path: light one marker at a time, one disc per capture (ambient light, bystanders)
+            from fitcast.calibration import capture_median, detect_one_marker
+            dark = capture_median(black_frame(cfg), rig.capture, rig.show, settle, int(cfg["median_frames"]))
+            found, used = [], []
+            for i in range(len(pts)):
+                active = np.zeros(len(pts), bool); active[i] = True
+                lit_i = capture_median(render_markers(cfg, pts, active), rig.capture, rig.show, settle,
+                                       int(cfg["median_frames"]))
+                c = detect_one_marker(lit_i, dark, cfg)
+                if c is not None:
+                    found.append(c); used.append(i)
+            print(f"sequential detection: {len(found)}/{len(pts)} markers found (missing: "
+                  f"{[i for i in range(len(pts)) if i not in used] or 'none'})")
+            if len(found) < 4:
+                raise RuntimeError("fewer than 4 markers detected (see out/calib_debug.jpg): step out of the beam, "
+                                   "point the camera at the whole projection, or run without --auto and click them")
+            cam, proj_pts = np.array(found), pts[used]
+            _dump_debug(lit, dark, cam, "out/calib_debug.jpg")
+        else:
+            print(f"detected {len(cam)} markers automatically (out/calib_debug.jpg)")
         rig.points = cam
     elif cam is not None:
         rig.points = cam
@@ -338,7 +357,7 @@ def live_session(rig: LiveRig, config: dict, out: str, auto: bool = False) -> No
     # (d) solve
     cal = Calibration(cfg, rig.cam_size)
     try:
-        err = cal.set_homography(cam, pts)
+        err = cal.set_homography(cam, proj_pts)
     except (RuntimeError, ValueError) as e:
         rig.status(f"solve failed: {e}", "r restart   q quit")
         wait_forever(rig)
@@ -356,12 +375,40 @@ def live_session(rig: LiveRig, config: dict, out: str, auto: bool = False) -> No
     # (g) save
     rig.status(f"Step 6/6: reprojection {err:.2f} px, {verdict}",
                "s save   r restart   q quit" + ("" if passed else "   (saving an unverified calibration)"))
+    if auto and (not passed or err > float(cfg["max_reproj_px"])):
+        raise RuntimeError(f"not saving: reprojection {err:.1f} px (limit {cfg['max_reproj_px']}), verify "
+                           f"{'passed' if passed else 'FAILED'} (max {max_err:.1f} px). Nobody in the beam? Camera sees "
+                           f"the whole projection? See out/calib_debug.jpg")
     if not auto:
         rig.reset_input()
         while rig.take_key() != ord("s"):
             rig.capture()
     cal.save(out)
     print(f"saved {out}: reproj {err:.3f} px, verified={passed}, gallery_rect {cal.data.gallery_rect}")
+
+
+def preview(config: dict, args: argparse.Namespace, seconds: float) -> int:
+    """Aiming aid: project all markers and show the camera feed on the laptop with instructions."""
+    import time
+    disp = config["display"]
+    px, py = args.projector_x or 0, args.projector_y or 0
+    source = args.source if args.source is not None else config["capture"]["source"]
+    rig = LiveRig(config, source, (px, py))
+    cfg = config["calibration"]
+    pattern = render_markers(cfg, marker_points(cfg))
+    cv2.rectangle(pattern, (4, 4), (int(cfg["projector_width"]) - 5, int(cfg["projector_height"]) - 5), (255, 255, 255), 6)
+    t0 = time.time()
+    try:
+        while time.time() - t0 < seconds:
+            rig.status(f"AIM: all 9 dots + the white border inside this view, nobody in frame  ({seconds - (time.time() - t0):.0f}s)",
+                       "camera must not move after this; q quit")
+            rig.show(pattern)
+            rig.capture()
+            if rig.take_key() == ord("q"):
+                break
+    finally:
+        rig.close()
+    return 0
 
 
 def live(config: dict, args: argparse.Namespace, out: str) -> int:
@@ -404,6 +451,8 @@ def main() -> int:
     ap.add_argument("--projector-y", type=int, default=None,
                     help="projector display origin y (default: display.projector_y, else 0)")
     ap.add_argument("--simulate", action="store_true", help="headless run against a fake rig")
+    ap.add_argument("--preview", type=float, default=0.0, metavar="SECONDS",
+                    help="aiming aid: project the dots and show the camera feed for this many seconds, then exit")
     ap.add_argument("--auto", action="store_true",
                     help="live mode without any keyboard/mouse: auto-detect, config gallery rect, save at once")
     ap.add_argument("--out", default=None,
@@ -414,6 +463,8 @@ def main() -> int:
     config = yaml.safe_load(Path(args.config).read_text())
     logging.basicConfig(level=config["logging"]["level"], format="%(levelname)s %(name)s: %(message)s")
     out = args.out or (config["calibration"]["sim_file"] if args.simulate else config["calibration"]["file"])
+    if args.preview > 0:
+        return preview(config, args, args.preview)
     return simulate(config, out) if args.simulate else live(config, args, out)
 
 

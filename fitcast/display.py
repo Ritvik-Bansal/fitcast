@@ -76,6 +76,51 @@ def cocoa_place_borderless(title: str, cocoa_index: int) -> tuple[int, int, int,
     return int(got.origin.x), int(got.origin.y), int(got.size.width), int(got.size.height)
 
 
+class CocoaProjector:
+    """Borderless NSWindow on one NSScreen whose layer contents are set to a CGImage each frame.
+    ~2 ms per 1080p frame versus ~19 ms for cv2.imshow through OpenCV's Cocoa window."""
+
+    def __init__(self, cocoa_index: int, size: tuple[int, int]) -> None:
+        import AppKit, Quartz  # type: ignore
+        self._AppKit, self._Q = AppKit, Quartz
+        fr = AppKit.NSScreen.screens()[cocoa_index].frame()
+        self.win = AppKit.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
+            fr, AppKit.NSWindowStyleMaskBorderless, AppKit.NSBackingStoreBuffered, False)
+        self.win.setLevel_(AppKit.NSScreenSaverWindowLevel)
+        self.win.setBackgroundColor_(AppKit.NSColor.blackColor())
+        self.win.setHasShadow_(False)
+        self.win.setIgnoresMouseEvents_(True)
+        self.win.setCollectionBehavior_(AppKit.NSWindowCollectionBehaviorCanJoinAllSpaces
+                                        | AppKit.NSWindowCollectionBehaviorStationary)
+        self.view = AppKit.NSView.alloc().initWithFrame_(((0, 0), (fr.size.width, fr.size.height)))
+        self.view.setWantsLayer_(True)
+        self.win.setContentView_(self.view)
+        self.view.layer().setBackgroundColor_(Quartz.CGColorCreateGenericRGB(0, 0, 0, 1))
+        self.view.layer().setContentsGravity_("resize")
+        self.win.orderFrontRegardless()
+        self.w, self.h = size
+        self._rgba = np.zeros((self.h, self.w, 4), np.uint8)
+        self._cs = Quartz.CGColorSpaceCreateDeviceRGB()
+        self.frame = (int(fr.origin.x), int(fr.origin.y), int(fr.size.width), int(fr.size.height))
+
+    def show(self, bgr: np.ndarray) -> None:
+        Q = self._Q
+        cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA, dst=self._rgba)
+        data = self._rgba.tobytes()
+        provider = Q.CGDataProviderCreateWithData(None, data, len(data), None)
+        img = Q.CGImageCreate(self.w, self.h, 8, 32, self.w * 4, self._cs,
+                              Q.kCGImageAlphaNoneSkipLast | Q.kCGBitmapByteOrderDefault,
+                              provider, None, False, Q.kCGRenderingIntentDefault)
+        self.view.layer().setContents_(img)
+
+    def close(self) -> None:
+        try:
+            self.win.orderOut_(None)
+            self.win.close()
+        except Exception:  # pragma: no cover
+            pass
+
+
 class Display:
     """Owns the two OpenCV windows. Must be used from the main thread (macOS Cocoa requirement)."""
 
@@ -108,6 +153,16 @@ class Display:
     def open_projector(self, fullscreen: bool = True) -> None:
         if self.headless:
             return
+        self.cocoa: CocoaProjector | None = None
+        if fullscreen and self.second is not None and self.cfg.get("projector_sink", "cocoa") == "cocoa":
+            try:
+                self.cocoa = CocoaProjector(self.second["cocoa_index"], (self.pw, self.ph))
+                self.proj_open = self.fullscreen = True
+                log.info("projector: CoreGraphics layer window on '%s' frame %s", self.second.get("name"), self.cocoa.frame)
+                return
+            except Exception as e:  # pragma: no cover
+                log.warning("CocoaProjector failed (%s); falling back to the OpenCV window", e)
+                self.cocoa = None
         cv2.namedWindow(self.proj_name, cv2.WINDOW_NORMAL)
         cv2.moveWindow(self.proj_name, *self.origin)
         cv2.resizeWindow(self.proj_name, self.pw, self.ph)
@@ -138,16 +193,27 @@ class Display:
         self.fullscreen = on
 
     def toggle_fullscreen(self) -> None:
+        if getattr(self, "cocoa", None) is not None:
+            return                      # the CoreGraphics window is always exactly the projector screen
         self.set_fullscreen(not self.fullscreen)
 
     def open_debug(self) -> None:
         if self.headless:
             return
         cv2.namedWindow(self.dbg_name, cv2.WINDOW_NORMAL)
+        cv2.moveWindow(self.dbg_name, 40, 60)                    # on the laptop screen, not under the projector window
+        try:
+            cv2.setWindowProperty(self.dbg_name, cv2.WND_PROP_TOPMOST, 1)
+        except cv2.error:
+            pass
         self.debug_open = True
 
     def show_projector(self, img: np.ndarray) -> None:
-        if self.proj_open:
+        if not self.proj_open:
+            return
+        if getattr(self, "cocoa", None) is not None:
+            self.cocoa.show(img)
+        else:
             cv2.imshow(self.proj_name, img)
 
     def show_debug(self, img: np.ndarray) -> None:
@@ -161,6 +227,8 @@ class Display:
         return cv2.waitKey(wait_ms) & 0xFFFF
 
     def close(self) -> None:
+        if getattr(self, "cocoa", None) is not None:
+            self.cocoa.close()
         if not self.headless:
             cv2.destroyAllWindows()
 

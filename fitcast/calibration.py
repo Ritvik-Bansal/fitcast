@@ -25,6 +25,12 @@ logger = logging.getLogger(__name__)
 
 # Keys not (yet) in config.yaml `calibration:`; used only when the config omits them.
 _DEFAULTS = {
+    "diff_threshold_min": 12,     # adaptive threshold floor
+    "adaptive_frac": 0.4,         # threshold = this fraction of the lit-dark contrast peak
+
+    "max_blob_area_px": 6000,     # larger blobs are people / glare, not a marker disc
+    "min_marker_mean_diff": 20,   # a real disc is clearly brighter than the ambient change
+
     "min_fill_ratio": 0.6,      # blob area / bbox area; a disc is ~0.785
     "max_aspect": 2.0,          # bbox aspect ratio limit
 
@@ -168,6 +174,10 @@ class Calibration:
             logger.error("Calibration file %s is a SIMULATED calibration (fake homography). Refusing to use it "
                          "with a real camera: the garment and the head blackout would land in the wrong place. "
                          "Fix: %s.", p, _FIX)
+            return False
+        if d.reproj_error_px > float(self.cfg.get("max_reproj_px", 10.0)):
+            logger.error("Calibration file %s has reprojection error %.1f px (limit %.1f): refusing it. Fix: %s.",
+                         p, d.reproj_error_px, float(self.cfg.get("max_reproj_px", 10.0)), _FIX)
             return False
         if d.projector_size != self.projector_size:
             logger.error("Calibration file %s was made for projector %s but config says %s. "
@@ -329,6 +339,70 @@ def render_markers(cfg: dict, pts: np.ndarray, active: np.ndarray | None = None)
     return img
 
 
+def _diff_gray(frame_lit: np.ndarray, frame_dark: np.ndarray) -> np.ndarray:
+    """Per-pixel maximum over colour channels of (lit - dark): projector white reads bluish under warm
+    room light, so the strongest channel carries 2-3x the contrast of a grey conversion."""
+    diff = cv2.subtract(frame_lit, frame_dark)
+    if diff.ndim == 3:
+        diff = np.max(diff, axis=2)
+    return diff
+
+
+def _marker_binary(diff_gray: np.ndarray, cfg: dict, peak: float | None = None) -> np.ndarray:
+    """Blur, remove the global brightness shift between captures (auto-exposure / projector black level),
+    then threshold adaptively: `adaptive_frac` of the (peak - shift) contrast, clamped to
+    [diff_threshold_min, diff_threshold]. `peak` defaults to the 99.9th percentile (several discs);
+    single-marker callers pass the max."""
+    k = int(_opt(cfg, "blur_ksize")) | 1
+    d = cv2.GaussianBlur(diff_gray, (k, k), 0)
+    shift = float(np.median(d))
+    if shift > 0:
+        d = cv2.subtract(d, int(round(shift)))
+    pk = float(np.percentile(d, 99.9)) if peak is None else float(peak) - shift
+    thr = _opt(cfg, "adaptive_frac") * pk
+    thr = float(min(cfg["diff_threshold"], max(_opt(cfg, "diff_threshold_min"), thr)))
+    _, binary = cv2.threshold(d, thr, 255, cv2.THRESH_BINARY)
+    return binary
+
+
+def detect_one_marker(frame_lit: np.ndarray, frame_dark: np.ndarray, cfg: dict) -> np.ndarray | None:
+    """Centroid (2,) of the single projected disc in `frame_lit` (one marker lit) or None.
+    Candidates are disc-shaped blobs of plausible size; the one with the highest mean difference
+    intensity wins (a projected disc is the brightest change in the scene, a moving person is not)."""
+    diff = _diff_gray(frame_lit, frame_dark)
+    binary = _marker_binary(diff, cfg, peak=float(cv2.GaussianBlur(diff, (5, 5), 0).max()))
+    n, labels, stats, cents = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    if n <= 1:
+        return None
+    stats, cents = stats[1:], cents[1:]
+    area = stats[:, cv2.CC_STAT_AREA].astype(float)
+    bw, bh = stats[:, cv2.CC_STAT_WIDTH].astype(float), stats[:, cv2.CC_STAT_HEIGHT].astype(float)
+    fill = area / np.maximum(bw * bh, 1.0)
+    aspect = np.maximum(bw, bh) / np.maximum(np.minimum(bw, bh), 1.0)
+    keep = ((area >= cfg["min_blob_area_px"]) & (area <= _opt(cfg, "max_blob_area_px"))
+            & (fill >= _opt(cfg, "min_fill_ratio")) & (aspect <= _opt(cfg, "max_aspect")))
+    if not keep.any():
+        return None
+    best, best_score = None, -1.0
+    for i in np.flatnonzero(keep):
+        score = float(cv2.mean(diff, mask=(labels == i + 1).astype(np.uint8))[0])
+        if score > best_score:
+            best, best_score = i, score
+    if best_score < _opt(cfg, "min_marker_mean_diff"):
+        return None                      # absolute floor: a disc must stand out of the noise
+    return cents[best].astype(np.float64)
+
+
+def capture_median(pattern: np.ndarray, capture_fn: CaptureFn, show_fn: ShowFn, settle_frames: int,
+                   n: int = 3) -> np.ndarray:
+    """Like capture_pattern but returns the per-pixel median of `n` frames (kills moving people)."""
+    show_fn(pattern)
+    for _ in range(int(settle_frames)):
+        capture_fn()
+    frames = np.stack([capture_fn() for _ in range(max(1, int(n)))])
+    return np.median(frames, axis=0).astype(np.uint8)
+
+
 def detect_markers(frame_lit: np.ndarray, frame_dark: np.ndarray, cfg: dict,
                    expected: int, rows: int) -> np.ndarray | None:
     """Find projected markers in camera frames: (expected, 2) camera px centroids in projector
@@ -336,12 +410,8 @@ def detect_markers(frame_lit: np.ndarray, frame_dark: np.ndarray, cfg: dict,
     count after the `min_blob_area_px` filter is not `expected`."""
     if rows <= 0 or expected % rows:
         raise ValueError(f"expected={expected} markers do not split into {rows} rows")
-    diff = cv2.subtract(frame_lit, frame_dark)
-    if diff.ndim == 3:
-        diff = cv2.cvtColor(diff, cv2.COLOR_BGR2GRAY)
-    k = int(_opt(cfg, "blur_ksize")) | 1
-    diff = cv2.GaussianBlur(diff, (k, k), 0)
-    _, binary = cv2.threshold(diff, cfg["diff_threshold"], 255, cv2.THRESH_BINARY)
+    diff = _diff_gray(frame_lit, frame_dark)
+    binary = _marker_binary(diff, cfg)
     _, _, stats, cents = cv2.connectedComponentsWithStats(binary, connectivity=8)
     stats, cents = stats[1:], cents[1:]
     area = stats[:, cv2.CC_STAT_AREA].astype(float)

@@ -1,7 +1,7 @@
 # FitCast configuration. Every tunable value lives here. CLI flags override a few (see main.py --help).
 
 capture:
-  source: 0                 # camera index or video path; --source overrides
+  source: "name:MacBook"    # camera index, video path, 'auto' (first streaming camera) or 'name:<substring>' (AVFoundation device name)
   width: 1280               # processing (camera-space) size
   height: 720
   fps: 30
@@ -9,7 +9,8 @@ capture:
   video_loop: true
   video_realtime: true      # play files at their native fps
   stale_ms: 500             # no new frame for this long -> projector shows black (safety)
-  stall_exit_s: 15          # no new frame for this long -> exit with an error
+  reopen_s: 3               # no new frame for this long -> release and reopen the camera (re-probes 'auto')
+  stall_exit_s: 40          # no new frame for this long (incl. reopen attempts) -> exit with an error
 
 tracker:
   backend: mediapipe        # mediapipe | rtmlib
@@ -65,10 +66,7 @@ tracker:
   facing:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
     hold_frames: 6
-    ref_update_rate: 0.02   # slow running-max update of the frontal reference
-    ref_decay_rate: 0.0005  # slow decay so a bad early max does not stick forever
-    ref_warmup_frames: 30   # fast running max for this many frames per reference
-    ref_jump_frac: 1.3      # a width this much above the reference is adopted at once (session started side-on)
+    ref_window_frames: 600  # frontal reference = max shoulder width over this many recent frames (~20 s): self-healing
     face_vis_back_threshold: 0.3   # nose/eye visibility below this is a weak "back" hint
 
 smoothing:
@@ -144,13 +142,19 @@ calibration:
   marker_radius_px: 30
   marker_margin_frac: 0.15  # inset from the projector frame edges
   min_blob_area_px: 40
-  diff_threshold: 40
+  diff_threshold: 40        # adaptive threshold CAP (lit-minus-dark, channel max)
+  diff_threshold_min: 12    # adaptive threshold floor
+  adaptive_frac: 0.4        # threshold = this fraction of the contrast peak, clamped to [min, cap]
   verify_tolerance_px: 6
+  max_reproj_px: 10         # calibrations above this RMS (projector px) are neither saved by --auto nor loaded
   settle_frames: 10         # frames to wait after changing the projected pattern
   blur_ksize: 5             # gaussian blur on the lit-minus-dark difference image (odd)
   ransac_reproj_px: 8.0     # RANSAC inlier threshold, projector px (~5 camera px)
   min_fill_ratio: 0.6       # marker blobs must fill >= this of their bounding box (a disc is 0.785)
   max_aspect: 2.0           # and be at most this elongated
+  max_blob_area_px: 6000    # larger blobs are people / glare
+  min_marker_mean_diff: 20  # single-marker mode: mean difference inside the disc must exceed this
+  median_frames: 3          # single-marker mode: per-pixel median of this many frames per capture
 
 sizing:
   height_cm: 175            # operator enters this; --height overrides
@@ -180,7 +184,10 @@ display:
   projector_y: null
   projector_window: FitCast Projector
   debug_window: FitCast Debug
-  debug_scale: 0.75
+  debug_scale: 0.6
+  debug_every_n: 2          # redraw the laptop debug window every Nth frame (a Cocoa imshow costs ~10 ms)
+  projector_sink: cocoa     # cocoa = CoreGraphics layer blit (~2 ms) | opencv = cv2.imshow (~19 ms at 1080p)
+  debug_show_composite: true   # debug window shows camera overlay | projector composite side by side
   show_debug: true
 
 demo:
