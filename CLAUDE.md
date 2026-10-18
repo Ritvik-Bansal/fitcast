@@ -39,6 +39,7 @@ class TrackResult:
     shoulder_width: float             # px, current
     ref_shoulder_width: float         # px, reference frontal width (running max)
     person_mask: np.ndarray | None    # (H, W) uint8 dilated whole-person mask (None for backends without one)
+    facing_ratio: float               # normalised shoulder width / frontal reference (1.0 = squarely frontal)
 
 @dataclass
 class Outfit:

@@ -24,6 +24,7 @@ class TrackResult:
     shoulder_width: float = 0.0
     ref_shoulder_width: float = 0.0
     person_mask: np.ndarray | None = None   # (H, W) uint8 0/255 dilated whole-person mask when the backend has one
+    facing_ratio: float = 1.0               # normalised shoulder width / frontal reference (1 = squarely frontal)
 
     @staticmethod
     def empty(h: int, w: int, timestamp: float = 0.0) -> "TrackResult":

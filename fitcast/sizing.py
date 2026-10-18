@@ -89,8 +89,9 @@ class SizeEstimator:
         """Accumulate one frame; ignored unless `track.ok` and the person faces front."""
         if not (track.ok and track.facing == "front"):
             return
-        # skip partially turned frames (facing keeps "front" through the hysteresis window)
-        if track.ref_shoulder_width > 0 and track.shoulder_width < self._min_frontal * track.ref_shoulder_width:
+        # skip partially turned frames (facing keeps "front" through the hysteresis window); the ratio is
+        # normalised by torso length, so walking closer/farther does not block sizing
+        if track.facing_ratio < self._min_frontal:
             return
         m = self._measure(track)
         if m is not None:

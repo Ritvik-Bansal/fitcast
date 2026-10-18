@@ -168,6 +168,10 @@ class App:
             self.sizing.reset()
         elif k == ord("g"):
             self.gallery.visible = not self.gallery.visible
+        elif k in (ord("["), ord("]")):
+            self.renderer.vertical_offset_frac += -0.02 if k == ord("[") else 0.02
+            log.info("renderer.vertical_offset_frac = %.2f (shoulder widths; put this in config.yaml to keep it)",
+                     self.renderer.vertical_offset_frac)
         elif k == ord("r"):
             if self.calib.load(self.args.calibration, allow_simulated=self.source.is_file):
                 if self.calib.data.gallery_rect:

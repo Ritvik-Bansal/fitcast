@@ -63,7 +63,8 @@ tracker:
   head:
     side_margin_frac: 0.35  # per side, fraction of shoulder width
     top_margin_frac: 0.70   # above the topmost face landmark (covers caps and hair)
-    bottom_gap_frac: 0.08   # box bottom sits this far above the shoulder line
+    bottom_gap_frac: 0.08   # box bottom never lower than this far above the shoulder line ...
+    chin_margin_frac: 0.30  # ... and normally ends this far below the lowest face landmark (chin + margin)
     min_margin_frac: 0.25   # spec minimum: never less than this around the face
     use_person_mask: true   # also union the pose person-mask pixels above the shoulders
     search_window_frac: 0.75   # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
@@ -85,7 +86,7 @@ smoothing:
 
 renderer:
   torso_margin_frac: 0.12   # expand torso quad outward, fraction of shoulder width
-  neck_raise_frac: 0.12     # raise the top edge toward the neck
+  neck_raise_frac: 0.25     # raise the top edge to the neck base (the mask clips what is not fabric)
   hem_drop_frac: 0.05       # extend the bottom edge below the hips (a tee hem sits at the hip joints)
   upper_arm_width_frac: 0.30
   forearm_width_frac: 0.24
@@ -98,6 +99,7 @@ renderer:
   bottom_knee_frac: 0.55    # where the bottoms texture splits thigh / shin (fraction of its height)
   waist_min_half_width_frac: 0.45
   feather_px: 4
+  vertical_offset_frac: 0.0 # global up(-)/down(+) nudge of all garment parts, in shoulder widths; keys [ and ] adjust live
   taper:                    # end-width multipliers and overlaps of the limb quads
     upper_arm: 0.85
     forearm: 0.8

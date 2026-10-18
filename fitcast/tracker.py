@@ -158,7 +158,10 @@ def compute_head_box(joints: np.ndarray, vis: np.ndarray, sw: float, cfg: dict, 
     sh_y = float(min(joints[L_SHOULDER, 1], joints[R_SHOULDER, 1]))
     x0, x1 = fx0 - m_side, fx1 + m_side
     y0 = fy0 - m_top
-    y1 = max(sh_y - cfg["bottom_gap_frac"] * sw, fy1 + m_min)
+    # bottom: the chin plus a margin (mouth corners are the lowest face landmarks), never below the shoulder line.
+    # Anchoring to the shoulders left the whole neck/collar dark and made every shirt look like it started too low.
+    chin = fy1 + cfg["chin_margin_frac"] * sw
+    y1 = max(min(chin, sh_y - cfg["bottom_gap_frac"] * sw), fy1 + m_min)
     # union with segmentation evidence above the shoulder line, near the face
     cx = 0.5 * (fx0 + fx1)
     win = cfg["search_window_frac"] * sw
@@ -629,4 +632,4 @@ class Tracker:
                         "mask_ms": (t3 - t2) * 1e3}
         return TrackResult(ok=True, joints=joints, visibility=vis, clothes_mask=mask, head_box=head,
                            facing=facing, timestamp=ts, shoulder_width=sw, ref_shoulder_width=ref_px,
-                           person_mask=self.last_person_mask)
+                           person_mask=self.last_person_mask, facing_ratio=float(self.facing.ratio))

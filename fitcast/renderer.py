@@ -25,6 +25,7 @@ class Renderer:
         self.min_vis = float(min_visibility)
         self.feather = int(cfg["feather_px"])
         self._fk = np.ones((max(self.feather, 1), max(self.feather, 1)), np.uint8)
+        self.vertical_offset_frac = float(cfg.get("vertical_offset_frac", 0.0))
         self.taper = cfg["taper"]
         self.canvas = np.zeros((self.H, self.W, 4), np.uint8)
         self._warp = np.zeros((self.H, self.W, 4), np.uint8)
@@ -39,6 +40,9 @@ class Renderer:
             return self.canvas
         j, v = track.joints, track.visibility
         sw = max(track.shoulder_width, 1.0)
+        if self.vertical_offset_frac:
+            j = j.copy()
+            j[:, 1] += self.vertical_offset_frac * sw      # live-tunable global nudge (keys [ and ])
         ref = max(track.ref_shoulder_width, sw)
         back = track.facing == "back"
         self._draw_bottoms(j, v, sw, outfit, back)
