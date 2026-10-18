@@ -178,8 +178,17 @@ class WakeListener(threading.Thread):
                 heard, silence = True, 0.0
             else:
                 silence += 0.1
-            if (heard and silence >= self.silence_s) or time.perf_counter() - t_start > self.max_request_s:
+            if heard and silence >= self.silence_s:
                 self._emit(buf, rec)
+                buf, silence, heard = [], 0.0, False
+            elif time.perf_counter() - t_start > self.max_request_s:
+                if heard:
+                    self._emit(buf, rec)
+                else:                                              # wake word, then nothing: no request
+                    log.info("no request after the wake word; back to idle")
+                    rec.Reset()
+                    self.state = "idle"
+                    self.on_request(None, "")
                 buf, silence, heard = [], 0.0, False
         if self.state == "listening" and buf and heard:
             self._emit(buf, rec)                                   # file source ended mid-request

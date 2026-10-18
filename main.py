@@ -666,7 +666,9 @@ class App:
                     speak(str(scfg["wake"].get("say_on_wake", "Yes?")))
             elif kind == "request":
                 path, hint = payload
-                if self.stylist.ask_audio(path, hint):
+                if path is None:
+                    self.compositor.set_message(["Didn't catch a request. Say Fitbot, then ask."], now, 5)
+                elif self.stylist.ask_audio(path, hint):
                     self.compositor.set_message([f"Heard: {hint[:60]}" if hint else "Heard you", "Stylist is thinking..."], now, 30)
             elif kind == "error":
                 log.error("wake word listener: %s", payload)
