@@ -153,7 +153,9 @@ gestures:
   band_bottom_frac: 1.7     # ... and mid-thigh (bottom); fractions along head->hip span
   zone_swipes: true         # swipe above the hips -> tops only, below -> bottoms only (mix and match)
   zone_line_sw: -0.3        # zone split, shoulder widths above the hip line: chest/head = tops, waist/legs = bottoms
-  min_travel_sw_zone: 0.8           # with zone swipes both zones accept subtler swipes ...
+  min_travel_sw_zone: 0.9           # with zone swipes both zones accept subtler swipes ...
+  max_body_travel_sw: 0.5           # shoulder centre may move at most this much within the window (no swipes while walking)
+  other_hand_max_travel_sw: 0.5     # the other wrist must stay put (both arms moving = arm swing)
   min_velocity_sw_per_s_zone: 1.8   # ... and slower ones (the landmark-jump caps still apply)
   person_right_is_next: true   # swipe toward the person's own right -> next outfit
   mirror_x: false           # set true if the camera feed is horizontally mirrored

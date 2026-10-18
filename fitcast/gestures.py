@@ -50,6 +50,9 @@ class GestureDetector:
         self.min_travel_zone = float(cfg.get("min_travel_sw_zone", 0.8))
         self.min_velocity_zone = float(cfg.get("min_velocity_sw_per_s_zone", 1.8))
         self._facing_warned = 0.0
+        self.max_body_travel = float(cfg.get("max_body_travel_sw", 0.5))
+        self.other_hand_max_travel = float(cfg.get("other_hand_max_travel_sw", 0.5))
+        self._body = deque()
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
         self.max_velocity = float(cfg.get("max_velocity_sw_per_s", 12.0))
         self.max_travel = float(cfg.get("max_travel_sw", 2.6))
@@ -104,6 +107,15 @@ class GestureDetector:
         if self._tpose(now, j, vis, sw):
             return ["calibrate"]
 
+        # a swipe is made standing still: while the body itself moves (walking sideways swings both arms) nothing fires
+        self._body.append((now, cx / sw, cy / sw))
+        while self._body[0][0] < now - self.window_s:
+            self._body.popleft()
+        if math.hypot(self._body[-1][1] - self._body[0][1], self._body[-1][2] - self._body[0][2]) > self.max_body_travel:
+            for _, _, b in self._wrists:
+                b.clear()
+            return []
+
         for idx, side, buf in self._wrists:
             wx, wy = float(j[idx, 0]), float(j[idx, 1])
             if vis[idx] < self.min_vis or not band_top <= wy <= band_bottom:
@@ -125,6 +137,11 @@ class GestureDetector:
                 continue
             velocity = abs(dx) / dt
             if velocity <= vel_min:
+                continue
+            # one-handed: if the other wrist travelled as well, this is arm swing, not a swipe
+            other = next(b for i2, _, b in self._wrists if i2 != idx)
+            if len(other) >= 2 and abs(other[-1][1] - other[0][1]) > self.other_hand_max_travel:
+                buf.clear()
                 continue
             if velocity > self.max_velocity or abs(dx) > self.max_travel:
                 buf.clear()                 # faster/farther than an arm can move: a landmark jump, not a swipe
@@ -194,6 +211,7 @@ class GestureDetector:
 
     def _clear(self) -> None:
         """Drop wrist histories and any in-progress raise-hands hold."""
+        self._body.clear()
         for _, _, buf in self._wrists:
             buf.clear()
         self._raise_start = None
