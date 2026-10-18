@@ -26,6 +26,8 @@ def load_cfg(**overrides: object) -> dict:
     cfg = dict(yaml.safe_load(path.read_text())["gestures"])
     cfg["zone_swipes"] = False          # direction tests check the bare event names; zones are tested separately
     cfg["vertical_swipes"] = False      # the horizontal rig tests; vertical swipes are tested separately
+    cfg["raise_event"] = "toggle_gallery"
+    cfg["raise_hands_s"] = 1.0          # the rig holds for ~1 s; the live hold is longer
     cfg.update(overrides)
     return cfg
 

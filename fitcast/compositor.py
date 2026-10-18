@@ -31,6 +31,7 @@ class Compositor:
         self.msg_lines: list[str] = []
         self.msg_until = 0.0
         self.msg_qr: np.ndarray | None = None
+        self.progress, self.progress_label = 0.0, ''
         self.out = np.zeros((self.H, self.W, 3), np.uint8)
         self._lit = np.zeros((self.H, self.W), np.uint8)
         self._lit3 = np.zeros((self.H, self.W, 3), np.uint8)
@@ -66,6 +67,26 @@ class Compositor:
 
     def set_gallery_rect(self, rect: list[int] | tuple[int, int, int, int]) -> None:
         self.rect = [int(x) for x in rect]
+
+    def set_progress(self, p: float, label: str = "Adding to cart") -> None:
+        """0 < p <= 1 draws a filling ring (hands-up hold) in the message band; 0 hides it."""
+        self.progress, self.progress_label = float(p), label
+
+    def _draw_progress(self, out: np.ndarray, track: TrackResult) -> None:
+        if self.progress <= 0.0 or self.rect_msg is None:
+            return
+        g = self.g
+        x0, y0, x1, y1 = self.rect_msg
+        r = max(12, (y1 - y0) // 2 - 6)
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        accent = tuple(int(c) for c in g["accent_color"])
+        cv2.circle(out, (cx, cy), r, (70, 70, 70), 4, cv2.LINE_AA)
+        cv2.ellipse(out, (cx, cy), (r, r), -90, 0, int(360 * self.progress), accent, 6, cv2.LINE_AA)
+        fs = float(g["font_scale"])
+        cv2.putText(out, self.progress_label, (cx + r + 12, cy + 6), cv2.FONT_HERSHEY_SIMPLEX, fs, (235, 235, 235), 1, cv2.LINE_AA)
+        if track.ok:   # never light the person
+            hx0, hy0, hx1, hy1 = track.head_box
+            out[hy0:hy1, hx0:hx1] = 0
 
     def set_message_rect(self, rect: list[int] | tuple[int, int, int, int] | None) -> None:
         """Where the stylist's answer is written (camera px, on the wall between the strips)."""
@@ -182,6 +203,7 @@ class Compositor:
                 self._draw_gallery(target, gallery, track, now, self.rect, "bottoms")
                 self._draw_gallery(target, gallery, track, now, self.rect_right, "tops")
             self._draw_message(target, track, now)
+            self._draw_progress(target, track)
 
         cv2.cvtColor(out, cv2.COLOR_BGR2GRAY, dst=self._lit)        # diagnostics: what actually goes to the projector
         self.lit_px = int(cv2.countNonZero(self._lit))

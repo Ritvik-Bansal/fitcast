@@ -196,6 +196,8 @@ class App:
         self.recorder = None
         self.wake = None
         self._dump_until, self._dump_n, self._dump_pending = 0.0, 0, -1
+        from fitcast.cart import LinkBook
+        self.links = LinkBook(cfg.get("stylist", {}).get("links_file", "assets/shop_links.yaml"), cfg["garments"]["dir"])
         self._frame_stats: list[str] | None = [] if cfg["logging"].get("frame_stats", False) else None
         if self._frame_stats is not None:
             Path(cfg["logging"].get("frame_stats_file", "out/frame_stats.csv")).write_text("t,ok,facing,sw,mask_px,lit_px,fallback,outfit\n")
@@ -248,6 +250,45 @@ class App:
         left = [int(gx0 + mx), int(gy0 + my), int(gx0 + mx) + strip_w, int(gy1 - my)]
         right = [int(gx1 - mx) - strip_w, int(gy0 + my), int(gx1 - mx), int(gy1 - my)]
         return left, right
+
+    def _build_cycles(self) -> None:
+        """Distinct, not hidden tops and bottoms for the strips, swipes and the stylist."""
+        g = self.gallery
+        gcfg = self.cfg["compositor"]["gallery"]
+        hide_t = set(gcfg.get("hide_tops") or []); hide_b = set(gcfg.get("hide_bottoms") or [])
+        g.bottom_cycle.clear(); g.top_cycle.clear()
+        seen_b: set = set(); seen_t: set = set()
+        for i, o in enumerate(g.outfits):
+            kb = o.name.split(" + ")[-1] if o.bottom_front is not None else None
+            if kb is not None and kb not in seen_b and kb not in hide_b:
+                seen_b.add(kb); g.bottom_cycle.append(i)
+            kt = o.name.split(" + ")[0] if o.top_front is not None else None
+            if kt is not None and kt not in seen_t and kt not in hide_t:
+                seen_t.add(kt); g.top_cycle.append(i)
+
+    def _reload_outfits(self) -> None:
+        """`touch out/reload.now` (the web UI does it after adding a garment): load new outfit folders live."""
+        from fitcast.garments import load_outfits
+        try:
+            outs = load_outfits(self.cfg["garments"])
+        except RuntimeError as e:
+            log.error("reload failed: %s", e)
+            return
+        g = self.gallery
+        cur_top = g.outfits[g.index].name.split(" + ")[0]
+        g.outfits = outs
+        g._mix.clear()
+        g.index = next((i for i, o in enumerate(outs) if o.name.split(" + ")[0] == cur_top), 0)
+        g.prev_index = g.index
+        if g.bottom_index >= len(outs):
+            g.bottom_index = -1
+        self._build_cycles()
+        self.compositor._thumb_cache.clear()
+        if self.stylist is not None:
+            self.stylist.outfits = outs
+            self.stylist.__init__(self.stylist.cfg, outs, self.stylist.key)
+        log.info("outfits reloaded: %d", len(outs))
+        self.compositor.set_message([f"New garment added: {outs[-1].name}"], time.perf_counter(), 6)
 
     def _apply_layout(self) -> None:
         """Strips on both sides of the beam and the stylist message band at the top between them."""
@@ -702,6 +743,10 @@ class App:
             self.run_self_calibration(track)
         if self.stylist is not None:
             self._step_stylist(now)
+        self.compositor.set_progress(self.gestures.hold_progress)
+        if self.frames % 15 == 0 and Path("out/reload.now").exists():
+            Path("out/reload.now").unlink(missing_ok=True)
+            self._reload_outfits()
         for ev in self.gestures.update(track):
             self.gesture_log.append((now, ev))
             log.info("gesture: %s", ev)
@@ -717,6 +762,14 @@ class App:
                 self.set_bottom(cur + (1 if ev == "next_bottom" else -1), now)
             elif ev == "toggle_gallery":
                 self.gallery.visible = not self.gallery.visible
+            elif ev == "add_to_cart":
+                from fitcast.cart import add_to_cart
+                added = add_to_cart(self.gallery.current, self.links)
+                lines = ["Added to cart"] + [f"{e['name']}" for e in added] + ["See the cart page"]
+                self.compositor.set_message(lines, now, 6)
+                if self.cfg.get("stylist", {}).get("speak", True):
+                    from fitcast.stylist import speak
+                    speak("Added to your cart")
             elif ev == "calibrate":
                 self.run_self_calibration(track)
         self.sizing.update(track)

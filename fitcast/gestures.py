@@ -46,6 +46,8 @@ class GestureDetector:
         self.log_events = bool(cfg["log_events"])
         self.min_vis = float(cfg.get("min_wrist_visibility", _DEFAULT_MIN_WRIST_VISIBILITY))
         self.zone_swipes = bool(cfg.get("zone_swipes", False))
+        self.raise_event = str(cfg.get("raise_event", "toggle_gallery"))   # both hands up for raise_hands_s
+        self.hold_progress = 0.0                                          # 0..1 while the hands are held up
         self.zone_line = float(cfg.get("zone_line_sw", -0.3))            # relative to the hip line (negative = above)
         self.min_travel_zone = float(cfg.get("min_travel_sw_zone", 0.8))
         self.min_velocity_zone = float(cfg.get("min_velocity_sw_per_s_zone", 1.8))
@@ -111,7 +113,7 @@ class GestureDetector:
         hip_ny = ((float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - cy) / sw   # hip line, shoulder-width units
 
         if self._raise_hands(now, j, vis, nose_y):
-            return ["toggle_gallery"]
+            return [self.raise_event]
         if self._tpose(now, j, vis, sw):
             return ["calibrate"]
 
@@ -241,15 +243,18 @@ class GestureDetector:
         if not raised:
             self._raise_start = None
             self._raise_fired = False  # re-arm only once hands drop
+            self.hold_progress = 0.0
             return False
         if self._raise_start is None:
             self._raise_start = now
         held = now - self._raise_start
+        self.hold_progress = 0.0 if self._raise_fired else min(1.0, held / self.raise_hands_s)
         if self._raise_fired or held < self.raise_hands_s:
             return False
         self._raise_fired = True
+        self.hold_progress = 0.0
         if self.log_events:
-            log.info("toggle_gallery t=%.3f wrist=both held=%.2fs", now, held)
+            log.info("%s t=%.3f wrist=both held=%.2fs", self.raise_event, now, held)
         return True
 
     def _clear(self) -> None:
@@ -258,3 +263,4 @@ class GestureDetector:
         for _, _, buf in self._wrists:
             buf.clear()
         self._raise_start = None
+        self.hold_progress = 0.0

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FitCast Add Garment</title>
+<style>
+  :root { --bg:#0e0e11; --card:#17181d; --ink:#f2f2f5; --muted:#9a9ba6; --accent:#ffd34d; --ok:#5ee29a; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(1200px 600px at 50% -10%, #23242c, var(--bg)); color:var(--ink); font:16px/1.5 -apple-system, "Inter", system-ui, sans-serif; padding:16px; }
+  .card { width:min(640px, 100%); background:var(--card); border:1px solid #2a2b33; border-radius:20px; padding:32px; box-shadow:0 30px 80px rgba(0,0,0,.5); }
+  h1 { margin:0 0 4px; font-size:28px; letter-spacing:-.02em; }
+  p.sub { margin:0 0 24px; color:var(--muted); }
+  form { display:grid; gap:12px; }
+  input, select, button { font:inherit; border-radius:12px; border:1px solid #33343d; background:#0f1014; color:var(--ink); padding:14px 16px; }
+  input:focus, select:focus { outline:2px solid var(--accent); border-color:transparent; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  button { background:var(--accent); color:#1a1300; font-weight:700; cursor:pointer; border:none; }
+  button:disabled { opacity:.6; cursor:progress; }
+  pre { margin:20px 0 0; white-space:pre-wrap; background:#0f1014; border-radius:12px; padding:14px; color:var(--muted); font-size:13px; max-height:260px; overflow:auto; }
+  .status { margin-top:16px; font-weight:600; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  nav { margin-top:20px; display:flex; gap:16px; }
+  nav a { color:var(--accent); text-decoration:none; }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid var(--accent); border-right-color:transparent; border-radius:50%; animation:r 1s linear infinite; vertical-align:-2px; margin-right:8px; }
+  @keyframes r { to { transform:rotate(360deg); } }
+</style>
+</head>
+<body>
+<main class="card">
+  <h1>Add a garment</h1>
+  <p class="sub">Paste a product page or image link. It is cut out, fitted and shows up in the booth.</p>
+  <form id="f">
+    <input id="url" name="url" type="url" placeholder="https://www.stussy.com/products/..." required autofocus>
+    <div class="row">
+      <select name="part"><option value="auto">Top or bottom: auto</option><option value="top">Top</option><option value="bottom">Bottom</option></select>
+      <input name="name" placeholder="Name (optional)" maxlength="28">
+    </div>
+    <button id="go" type="submit">Add to booth</button>
+  </form>
+  <div id="status" class="status"></div>
+  <pre id="log" hidden></pre>
+  <nav><a href="/cart">Open cart →</a></nav>
+</main>
+<script>
+const f = document.getElementById('f'), go = document.getElementById('go'), st = document.getElementById('status'), lg = document.getElementById('log');
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  go.disabled = true; st.className = 'status'; st.innerHTML = '<span class="spin"></span>Fetching and fitting… (10–60 s)'; lg.hidden = true;
+  try {
+    const r = await fetch('/api/add', { method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'}, body: new URLSearchParams(new FormData(f)) });
+    const d = await r.json();
+    st.className = 'status ' + (d.ok ? 'ok' : 'bad');
+    st.textContent = d.ok ? 'Added. The booth reloads it within a few seconds.' : (d.code === 2 ? 'That shop blocks downloads: save the product image and paste a direct image link.' : d.code === 3 ? 'Only photos with a person on them were found: use a flat product image link.' : 'Could not build the garment.');
+    lg.textContent = d.log || ''; lg.hidden = !d.log;
+  } catch (err) { st.className = 'status bad'; st.textContent = 'Server not reachable: ' + err; }
+  go.disabled = false;
+});
+</script>
+</body>
+</html>

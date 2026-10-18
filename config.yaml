@@ -184,7 +184,8 @@ gestures:
   min_velocity_sw_per_s_zone: 1.8   # ... and slower ones (the landmark-jump caps still apply)
   person_right_is_next: true   # swipe toward the person's own right -> next outfit
   mirror_x: false           # set true if the camera feed is horizontally mirrored
-  raise_hands_s: 1.0
+  raise_hands_s: 2.5        # both hands above the head this long -> raise_event (a ring fills on the wall meanwhile)
+  raise_event: add_to_cart  # add_to_cart | toggle_gallery
   tpose_s: 1.5              # arms straight out to the sides for this long -> self-calibration ("calibrate" event)
   tpose_level_sw: 0.45      # wrist within this many shoulder widths of shoulder height
   tpose_reach_sw: 0.75      # wrist at least this far outside the shoulder

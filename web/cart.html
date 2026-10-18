@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FitCast Cart</title>
+<style>
+  :root { --bg:#0e0e11; --card:#17181d; --ink:#f2f2f5; --muted:#9a9ba6; --accent:#ffd34d; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; background:radial-gradient(1200px 600px at 50% -10%, #23242c, var(--bg)); color:var(--ink); font:16px/1.5 -apple-system, "Inter", system-ui, sans-serif; padding:32px 16px; }
+  .wrap { width:min(820px, 100%); margin:0 auto; }
+  header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:20px; }
+  h1 { margin:0; font-size:32px; letter-spacing:-.02em; }
+  .count { color:var(--muted); }
+  ol { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+  li { background:var(--card); border:1px solid #2a2b33; border-radius:16px; padding:18px 20px; display:grid; grid-template-columns:auto 1fr auto; gap:16px; align-items:center; }
+  .tag { font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#1a1300; background:var(--accent); border-radius:999px; padding:4px 10px; }
+  .tag.bottom { background:#8fd3ff; }
+  .name { font-weight:600; font-size:18px; }
+  .url { color:var(--muted); font-size:13px; word-break:break-all; }
+  a.buy { color:var(--accent); font-weight:700; text-decoration:none; white-space:nowrap; }
+  .time { color:var(--muted); font-size:12px; }
+  .empty { color:var(--muted); text-align:center; padding:60px 0; }
+  nav { margin-top:24px; display:flex; gap:20px; }
+  nav a, nav button { color:var(--accent); background:none; border:none; font:inherit; cursor:pointer; padding:0; text-decoration:none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>Cart</h1><span class="count" id="count"></span></header>
+  <ol id="list"></ol>
+  <div class="empty" id="empty" hidden>Nothing yet. Hold both hands up in the booth for three seconds to add what you are wearing.</div>
+  <nav><a href="/">← Add a garment</a><button id="clear">Clear cart</button></nav>
+</div>
+<script>
+const list = document.getElementById('list'), empty = document.getElementById('empty'), count = document.getElementById('count');
+let last = '';
+async function refresh() {
+  try {
+    const r = await fetch('/api/cart', {cache: 'no-store'}); const d = await r.json(); const key = JSON.stringify(d);
+    if (key === last) return; last = key;
+    list.innerHTML = '';
+    d.slice().reverse().forEach((e) => {
+      const li = document.createElement('li');
+      li.innerHTML = `<span class="tag ${e.part}">${e.part}</span><div><div class="name">${e.name}</div><div class="url">${e.url}</div><div class="time">${e.time}</div></div><a class="buy" href="${e.url}" target="_blank" rel="noopener">Buy →</a>`;
+      list.appendChild(li);
+    });
+    empty.hidden = d.length > 0; count.textContent = d.length ? `${d.length} item${d.length > 1 ? 's' : ''}` : '';
+  } catch (err) { count.textContent = 'server offline'; }
+}
+document.getElementById('clear').onclick = async () => { await fetch('/api/cart/clear', {method: 'POST'}); last = ''; refresh(); };
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
