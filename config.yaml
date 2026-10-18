@@ -278,3 +278,16 @@ calibration3d:
   min_depth_confidence: 2
   ransac_reproj_px: 3.0
   target_reproj_px: 1.5
+
+latency:                    # scripts/latency_probe.py
+  period_s: 1.0             # white this long, then black this long
+  count: 20                 # flash cycles per phase
+  roi_frac: 0.2             # default camera ROI = centred box of this fraction
+  max_delay_s: 0.8
+  settle_s: 1.5             # black before phase 1 (camera warm-up)
+  robust_pct: 5.0
+  hysteresis_frac: 0.15
+  min_contrast: 12.0        # grey levels; below this the camera does not see the flash
+  loop_timeout_s: 2.0
+  poll_s: 0.001
+  out_dir: out

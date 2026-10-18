@@ -18,3 +18,5 @@ calibration.yaml
 !assets/test/*.mp4
 .pytest_cache/
 assets/garments/
+ios/build/
+ios/*.xcodeproj/
