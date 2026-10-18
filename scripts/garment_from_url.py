@@ -56,7 +56,7 @@ for _p in (ROOT, ROOT / "scripts"):
 
 from fitcast.garments import ensure_rgba, load_outfit  # noqa: E402
 from fetch_garments import (BG_DIST, PAIRS as PHOTO_PAIRS, SMOOTH_D, SMOOTH_SIGMA_COLOR,  # noqa: E402
-                            SMOOTH_SIGMA_SPACE, cutout, garment_rgba, layout_bottom, layout_top, torso_region)
+                            SMOOTH_SIGMA_SPACE, cutout, flatten_chroma, garment_rgba, layout_bottom, layout_top, torso_region)
 from prepare_garments import _hex, _median_color, estimate_sleeve, load_config, mean_luminance, write_outfit  # noqa: E402
 import procedural_garments as pgen  # noqa: E402
 
@@ -73,6 +73,8 @@ URL_DEFAULTS: dict = {
     "bottom_aspect": 1.3,          # cut-out height/width at or above this is a bottom when no keyword decides
     "name_max_chars": 28,
     "dark_gamma_min": 0.35,        # strongest lift for garments darker than garments.min_mean_luminance
+    "dark_chroma_dist": 30.0,      # after a lift: fabric pixels within this Lab distance get the median hue
+                                   # (kills JPEG chroma blocks); 0 = off
     "edge_erode_px": 2,            # alpha erosion at photo resolution: drops background fringe (white halo)
     "model_skin_frac": 0.03,       # selfie_multiclass face+body skin share above which a photo is "on-model"
     "model_face_frac": 0.001,      # ... or face-skin share above this (0 on every flat garment photo measured)
@@ -531,6 +533,8 @@ def cut_garment(img: np.ndarray, cfg: dict, ucfg: dict, white: int | None = None
             bgr = cv2.bilateralFilter(bgr, SMOOTH_D, SMOOTH_SIGMA_COLOR, SMOOTH_SIGMA_SPACE)
         lut = (255.0 * (np.arange(256) / 255.0) ** gamma).round().astype(np.uint8)
         out = np.dstack([cv2.LUT(bgr, lut), out[..., 3]])
+        if gamma < 1.0 and float(ucfg["dark_chroma_dist"]) > 0:
+            out = flatten_chroma(out, float(ucfg["dark_chroma_dist"]))
     return out
 
 
@@ -744,6 +748,9 @@ def append_source(sources_md: Path, line: str, key: str | None = None) -> None:
             i += 1
         while i > 0 and not lines[i - 1].strip():
             i -= 1
+        if not lines[i - 1].startswith("- "):     # first entry after the intro: keep a blank line
+            lines.insert(i, "")
+            i += 1
         lines.insert(i, line)
     else:
         lines += ["", SOURCES_HEADING, "",
