@@ -55,7 +55,8 @@ for _p in (ROOT, ROOT / "scripts"):
         sys.path.insert(0, str(_p))
 
 from fitcast.garments import ensure_rgba, load_outfit  # noqa: E402
-from fetch_garments import BG_DIST, PAIRS as PHOTO_PAIRS, cutout, garment_rgba, layout_bottom, layout_top, torso_region  # noqa: E402
+from fetch_garments import (BG_DIST, PAIRS as PHOTO_PAIRS, SMOOTH_D, SMOOTH_SIGMA_COLOR,  # noqa: E402
+                            SMOOTH_SIGMA_SPACE, cutout, garment_rgba, layout_bottom, layout_top, torso_region)
 from prepare_garments import _hex, _median_color, estimate_sleeve, load_config, mean_luminance, write_outfit  # noqa: E402
 import procedural_garments as pgen  # noqa: E402
 
@@ -74,6 +75,7 @@ URL_DEFAULTS: dict = {
     "dark_gamma_min": 0.35,        # strongest lift for garments darker than garments.min_mean_luminance
     "edge_erode_px": 2,            # alpha erosion at photo resolution: drops background fringe (white halo)
     "model_skin_frac": 0.03,       # selfie_multiclass face+body skin share above which a photo is "on-model"
+    "model_face_frac": 0.001,      # ... or face-skin share above this (0 on every flat garment photo measured)
     "seg_confidence": 0.5,         # selfie_multiclass confidence counted as a class hit
     "seg_max_px": 512,             # longest side the segmenter sees
     "edge_cut_frac": 0.25,         # cut-out covering more of the bottom image rows than this = cut off by the frame
@@ -341,7 +343,7 @@ def parse_page(html_text: str, base_url: str) -> Page:
 
 class ModelShotDetector:
     """Flags on-model photos with the MediaPipe selfie_multiclass segmenter (the tracker's seg_model, IMAGE
-    mode): face+body skin share above `model_skin_frac`. Without mediapipe or the model file the check is
+    mode): face-skin share above `model_face_frac` or face+body skin above `model_skin_frac`. Without mediapipe or the model file the check is
     skipped with a warning (the frame-edge check still runs)."""
 
     def __init__(self, seg_model: str | Path | None, ucfg: dict) -> None:
@@ -369,8 +371,8 @@ class ModelShotDetector:
                 log.warning("on-model photo check disabled (%s); check the cut-out by eye", e)
         return self._seg
 
-    def skin_frac(self, img: np.ndarray) -> float | None:
-        """Share of the image the segmenter labels face or body skin; None when the check is unavailable."""
+    def skin_frac(self, img: np.ndarray) -> tuple[float, float] | None:
+        """(face-skin share, face+body skin share) of the image; None when the check is unavailable."""
         seg = self._segmenter()
         if seg is None:
             return None
@@ -381,11 +383,11 @@ class ModelShotDetector:
         rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
         conf = seg.segment(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)).confidence_masks
         thr = float(self.ucfg["seg_confidence"])
-        skin = np.zeros(rgb.shape[:2], bool)
-        for label in (2, 3):                       # body skin, face skin
+        def hit(label: int) -> np.ndarray:
             a = conf[label].numpy_view()
-            skin |= (a[:, :, 0] if a.ndim == 3 else a) > thr
-        return float(skin.mean())
+            return (a[:, :, 0] if a.ndim == 3 else a) > thr
+        face = hit(3)                              # 2 body skin, 3 face skin
+        return float(face.mean()), float((face | hit(2)).mean())
 
     def close(self) -> None:
         """Release the MediaPipe segmenter."""
@@ -412,9 +414,9 @@ def edge_cut_frac(img: np.ndarray, white: int, bg_dist: float, rows: int) -> flo
 def reject_reason(img: np.ndarray, cfg: dict, ucfg: dict, detector: ModelShotDetector | None,
                   white: int | None = None, bg_dist: float | None = None) -> str | None:
     """Why `img` cannot become a garment texture (on-model photo, garment cut off by the frame), or None."""
-    frac = detector.skin_frac(img) if detector is not None else None
-    if frac is not None and frac > float(ucfg["model_skin_frac"]):
-        return f"on-model photo ({frac:.1%} skin)"
+    fr = detector.skin_frac(img) if detector is not None else None
+    if fr is not None and (fr[0] > float(ucfg["model_face_frac"]) or fr[1] > float(ucfg["model_skin_frac"])):
+        return f"on-model photo ({fr[0]:.1%} face, {fr[1]:.1%} skin)"
     cut = edge_cut_frac(img, int(white if white is not None else cfg["white_bg_threshold"]),
                         float(BG_DIST if bg_dist is None else bg_dist), int(ucfg["edge_rows"]))
     if cut > float(ucfg["edge_cut_frac"]):
@@ -524,8 +526,11 @@ def cut_garment(img: np.ndarray, cfg: dict, ucfg: dict, white: int | None = None
             log.info("dark garment (mean luminance %.0f < %.0f): gamma %.2f so it shows when projected",
                      lum, target, gamma)
     if gamma != 1.0:
+        bgr = np.ascontiguousarray(out[..., :3])
+        if gamma < 1.0:   # the lift amplifies JPEG blocking in dark fabric: edge-preserving smooth first
+            bgr = cv2.bilateralFilter(bgr, SMOOTH_D, SMOOTH_SIGMA_COLOR, SMOOTH_SIGMA_SPACE)
         lut = (255.0 * (np.arange(256) / 255.0) ** gamma).round().astype(np.uint8)
-        out = np.dstack([cv2.LUT(np.ascontiguousarray(out[..., :3]), lut), out[..., 3]])
+        out = np.dstack([cv2.LUT(bgr, lut), out[..., 3]])
     return out
 
 

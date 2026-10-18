@@ -291,7 +291,8 @@ def test_skin_detector_on_flat_garment(config, cfg):
         pytest.skip(f"{model} missing")
     det = gfu.ModelShotDetector(model, gfu.url_cfg(cfg))
     try:
-        assert det.skin_frac(tee_image()) < gfu.url_cfg(cfg)["model_skin_frac"]
+        face, skin = det.skin_frac(tee_image())
+        assert face <= gfu.url_cfg(cfg)["model_face_frac"] and skin <= gfu.url_cfg(cfg)["model_skin_frac"]
     finally:
         det.close()
     assert gfu.ModelShotDetector(ROOT / "nope.tflite", gfu.url_cfg(cfg)).skin_frac(tee_image()) is None

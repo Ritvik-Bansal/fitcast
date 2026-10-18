@@ -28,3 +28,9 @@ assets/garments/_raw/*
 !assets/garments/_raw/sources.json
 
 secrets/
+!assets/garments/_raw_tops/
+assets/garments/_raw_tops/*
+!assets/garments/_raw_tops/sources.json
+!assets/garments/_raw_bottoms/
+assets/garments/_raw_bottoms/*
+!assets/garments/_raw_bottoms/sources.json
