@@ -183,6 +183,7 @@ class Compositor:
                 self._draw_gallery(target, gallery, track, now, self.rect_right, "tops")
             self._draw_message(target, track, now)
 
+        cv2.cvtColor(out, cv2.COLOR_BGR2GRAY, dst=self._lit)        # diagnostics: what actually goes to the projector
         self.lit_px = int(cv2.countNonZero(self._lit))
         # SAFETY: the head box is always the last operation on the lit frame: a flat dim fill (`head_fill_level`,
         # default 0 = black, hard cap 25%), never garment pixels. The gallery layer stays black there.

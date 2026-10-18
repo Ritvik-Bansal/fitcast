@@ -253,3 +253,53 @@ def test_cli_exit_code_on_block(site, cfg, tmp_path):
     full["garments"]["from_url"] = FAST
     cfg_path.write_text(yaml.safe_dump(full))
     assert gfu.main([f"{base}/blocked/x", "--config", str(cfg_path), "--garments-dir", str(tmp_path)]) == 2
+
+
+# ----------------------------------------------------------------------------- on-model / cropped photo gate
+
+def test_page_skips_rejected_candidates(site, cfg):
+    base, d = site
+    cv2.imwrite(str(d / "model.png"), np.full((600, 500, 3), 128, np.uint8))
+    cv2.imwrite(str(d / "tee.png"), tee_image())
+    (d / "p.html").write_text("<meta property='og:image' content='model.png'><img src='tee.png'>")
+    check = lambda im: "on-model photo (9% skin)" if im.shape[:2] == (600, 500) else None  # noqa: E731
+    s = gfu.resolve_image(f"{base}/p.html", gfu.url_cfg(cfg), check)
+    assert s.image_url.endswith("/tee.png")
+    (d / "q.html").write_text("<meta property='og:image' content='model.png'>")
+    with pytest.raises(gfu.UnusableImageError, match="product-only shot"):
+        gfu.resolve_image(f"{base}/q.html", gfu.url_cfg(cfg), check)
+    with pytest.raises(gfu.UnusableImageError):
+        gfu.resolve_image(str(d / "model.png"), gfu.url_cfg(cfg), check)
+
+
+def test_edge_backstop_rejects_garment_cut_by_frame(cfg):
+    u = gfu.url_cfg(cfg)
+    cropped = np.full((500, 400, 3), 255, np.uint8)
+    cv2.rectangle(cropped, (60, 80), (340, 499), (40, 40, 200), -1)          # runs off the bottom edge
+    assert "runs off" in gfu.reject_reason(cropped, cfg, u, None)
+    assert gfu.reject_reason(tee_image(), cfg, u, None) is None
+    assert gfu.reject_reason(pants_image(), cfg, u, None) is None
+    barred = tee_image()
+    barred[-12:] = 150                                                         # museum credit bar, separate blob
+    assert gfu.reject_reason(barred, cfg, u, None) is None
+
+
+def test_skin_detector_on_flat_garment(config, cfg):
+    pytest.importorskip("mediapipe")
+    model = ROOT / config["tracker"]["mediapipe"]["seg_model"]
+    if not model.is_file():
+        pytest.skip(f"{model} missing")
+    det = gfu.ModelShotDetector(model, gfu.url_cfg(cfg))
+    try:
+        assert det.skin_frac(tee_image()) < gfu.url_cfg(cfg)["model_skin_frac"]
+    finally:
+        det.close()
+    assert gfu.ModelShotDetector(ROOT / "nope.tflite", gfu.url_cfg(cfg)).skin_frac(tee_image()) is None
+
+
+def test_cli_exit_code_on_model_only(tmp_path, cfg):
+    p = tmp_path / "cropped.png"
+    img = np.full((500, 400, 3), 255, np.uint8)
+    cv2.rectangle(img, (60, 80), (340, 499), (40, 40, 200), -1)
+    cv2.imwrite(str(p), img)
+    assert gfu.main([str(p), "--garments-dir", str(tmp_path)]) == 3

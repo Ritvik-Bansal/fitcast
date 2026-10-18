@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import functools
 import gzip
 import json
 import logging
@@ -54,7 +55,7 @@ for _p in (ROOT, ROOT / "scripts"):
         sys.path.insert(0, str(_p))
 
 from fitcast.garments import ensure_rgba, load_outfit  # noqa: E402
-from fetch_garments import BG_DIST, PAIRS as PHOTO_PAIRS, garment_rgba, layout_bottom, layout_top, torso_region  # noqa: E402
+from fetch_garments import BG_DIST, PAIRS as PHOTO_PAIRS, cutout, garment_rgba, layout_bottom, layout_top, torso_region  # noqa: E402
 from prepare_garments import _hex, _median_color, estimate_sleeve, load_config, mean_luminance, write_outfit  # noqa: E402
 import procedural_garments as pgen  # noqa: E402
 
@@ -66,12 +67,17 @@ URL_DEFAULTS: dict = {
     "retries": 3,
     "retry_backoff_s": 1.5,        # sleep = backoff * attempt number
     "min_image_px": 200,           # candidates whose shorter side is below this are icons, not product shots
-    "max_candidates": 8,           # page images tried before giving up
+    "max_candidates": 16,          # page images tried before giving up (on-model shots are skipped)
     "transparent_frac": 0.02,      # an image with at least this share of alpha < 128 is already cut out
     "bottom_aspect": 1.3,          # cut-out height/width at or above this is a bottom when no keyword decides
     "name_max_chars": 28,
     "dark_gamma_min": 0.35,        # strongest lift for garments darker than garments.min_mean_luminance
     "edge_erode_px": 2,            # alpha erosion at photo resolution: drops background fringe (white halo)
+    "model_skin_frac": 0.03,       # selfie_multiclass face+body skin share above which a photo is "on-model"
+    "seg_confidence": 0.5,         # selfie_multiclass confidence counted as a class hit
+    "seg_max_px": 512,             # longest side the segmenter sees
+    "edge_cut_frac": 0.25,         # cut-out covering more of the bottom image rows than this = cut off by the frame
+    "edge_rows": 4,                # rows above the bottom edge checked (grabCut forces the last 2 to background)
     "first_prefix": 90,            # default output folders are numbered from here
     "pair_min_prefix": 14,         # first real-photo outfit folder
     "pair_max_prefix": 89,         # folders above this are outputs of this script, never partners
@@ -92,7 +98,7 @@ TOP_WORDS = ("tee", "tshirt", "shirt", "hoodie", "jacket", "sweater", "jersey", 
 BOTTOM_WORDS = ("jeans", "pant", "pants", "trouser", "trousers", "jogger", "joggers", "shorts", "cargo", "cargos",
                 "chino", "chinos", "sweatpants", "trackpants", "leggings", "skirt", "slacks", "bottoms")
 SLEEVE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (     # first rule with a hit wins
-    ("short", ("short sleeve", "short sleeved", "shortsleeve")),
+    ("short", ("short sleeve", "short sleeved", "shortsleeve", "half sleeve", "half sleeved")),
     ("long", ("long sleeve", "long sleeved", "longsleeve")),
     ("none", ("sleeveless", "tank", "singlet", "vest", "camisole", "jersey")),
     ("long", ("hoodie", "sweater", "sweatshirt", "jacket", "coat", "cardigan", "bomber", "fleece", "pullover",
@@ -103,6 +109,15 @@ IMAGE_EXT = re.compile(r"\.(jpe?g|png|webp|avif|gif|bmp|tiff?)$", re.I)
 
 class BlockedError(RuntimeError):
     """The site refused the download (HTTP 401/403/429/503 or a captcha / bot-check page)."""
+
+
+class UnusableImageError(RuntimeError):
+    """Every image found is an on-model photo or a garment cut off by the frame."""
+
+
+SAVE_FLAT_HINT = ("open the product's image gallery in a browser, save a product-only shot (garment alone, laid "
+                  "flat or on an invisible mannequin, plain light background) and pass the file path; "
+                  "--allow-model skips this check (the person ends up in the texture)")
 
 
 def _blocked_msg(where: str, why: str) -> str:
@@ -322,6 +337,91 @@ def parse_page(html_text: str, base_url: str) -> Page:
     return Page(re.sub(r"\s+", " ", title).strip(), out)
 
 
+# ----------------------------------------------------------------------------- photo checks
+
+class ModelShotDetector:
+    """Flags on-model photos with the MediaPipe selfie_multiclass segmenter (the tracker's seg_model, IMAGE
+    mode): face+body skin share above `model_skin_frac`. Without mediapipe or the model file the check is
+    skipped with a warning (the frame-edge check still runs)."""
+
+    def __init__(self, seg_model: str | Path | None, ucfg: dict) -> None:
+        self.path = Path(seg_model) if seg_model else None
+        if self.path is not None and not self.path.is_absolute():
+            self.path = ROOT / self.path
+        self.ucfg = ucfg
+        self._seg = None
+        self._failed = self.path is None
+
+    def _segmenter(self):
+        if self._seg is None and not self._failed:
+            try:
+                import mediapipe as mp
+                from mediapipe.tasks.python import BaseOptions, vision
+                if not self.path.is_file():
+                    raise FileNotFoundError(f"{self.path} missing; run `.venv/bin/python scripts/download_models.py`")
+                self._mp = mp
+                self._seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
+                    base_options=BaseOptions(model_asset_path=str(self.path)),
+                    running_mode=vision.RunningMode.IMAGE, output_category_mask=False,
+                    output_confidence_masks=True))
+            except (ImportError, OSError, RuntimeError, ValueError) as e:
+                self._failed = True
+                log.warning("on-model photo check disabled (%s); check the cut-out by eye", e)
+        return self._seg
+
+    def skin_frac(self, img: np.ndarray) -> float | None:
+        """Share of the image the segmenter labels face or body skin; None when the check is unavailable."""
+        seg = self._segmenter()
+        if seg is None:
+            return None
+        bgr = np.ascontiguousarray(ensure_rgba(img)[..., :3])
+        s = min(1.0, float(self.ucfg["seg_max_px"]) / max(bgr.shape[:2]))
+        if s < 1:
+            bgr = cv2.resize(bgr, (round(bgr.shape[1] * s), round(bgr.shape[0] * s)), interpolation=cv2.INTER_AREA)
+        rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        conf = seg.segment(self._mp.Image(image_format=self._mp.ImageFormat.SRGB, data=rgb)).confidence_masks
+        thr = float(self.ucfg["seg_confidence"])
+        skin = np.zeros(rgb.shape[:2], bool)
+        for label in (2, 3):                       # body skin, face skin
+            a = conf[label].numpy_view()
+            skin |= (a[:, :, 0] if a.ndim == 3 else a) > thr
+        return float(skin.mean())
+
+    def close(self) -> None:
+        """Release the MediaPipe segmenter."""
+        if self._seg is not None:
+            self._seg.close()
+            self._seg = None
+
+
+def edge_cut_frac(img: np.ndarray, white: int, bg_dist: float, rows: int) -> float:
+    """Share of the bottom image rows covered by the garment mask (alpha, or the fetch_garments.cutout blob):
+    a garment running off the frame (on-model crop) covers much of it; a separate credit bar does not."""
+    rgba = ensure_rgba(img)
+    a = rgba[..., 3]
+    if float((a < 128).mean()) > 0:
+        m = a > 127
+    else:
+        try:
+            m = cutout(np.ascontiguousarray(rgba[..., :3]), white, bg_dist) > 0
+        except (ValueError, cv2.error):
+            return 0.0                          # no garment at all: cut_garment reports it
+    return float(m[-rows:].any(axis=0).mean())
+
+
+def reject_reason(img: np.ndarray, cfg: dict, ucfg: dict, detector: ModelShotDetector | None,
+                  white: int | None = None, bg_dist: float | None = None) -> str | None:
+    """Why `img` cannot become a garment texture (on-model photo, garment cut off by the frame), or None."""
+    frac = detector.skin_frac(img) if detector is not None else None
+    if frac is not None and frac > float(ucfg["model_skin_frac"]):
+        return f"on-model photo ({frac:.1%} skin)"
+    cut = edge_cut_frac(img, int(white if white is not None else cfg["white_bg_threshold"]),
+                        float(BG_DIST if bg_dist is None else bg_dist), int(ucfg["edge_rows"]))
+    if cut > float(ucfg["edge_cut_frac"]):
+        return f"garment runs off the bottom of the photo ({cut:.0%} of the bottom edge), likely an on-model crop"
+    return None
+
+
 # ----------------------------------------------------------------------------- resolve
 
 @dataclass
@@ -333,13 +433,18 @@ class Source:
     title: str
 
 
-def resolve_image(src: str, ucfg: dict) -> Source:
+def resolve_image(src: str, ucfg: dict, check=None) -> Source:
     """Fetch `src`; return the product image (directly, or the best candidate of an HTML page).
 
-    Raises BlockedError when the site refuses, RuntimeError when no usable image is found."""
+    `check(img) -> str | None` rejects images (reject_reason); rejected page candidates are skipped.
+    Raises BlockedError when the site refuses, UnusableImageError when every image is rejected,
+    RuntimeError when no usable image is found."""
     f = fetch_bytes(src, ucfg)
     img = decode_image(f.data)
     if img is not None:
+        why = check(img) if check else None
+        if why:
+            raise UnusableImageError(f"{src}: {why}; {SAVE_FLAT_HINT}")
         return Source(img, f.data, f.url, None, "")
     if not _looks_like_html(f):
         raise RuntimeError(f"{src}: not an image OpenCV can decode (SVG/HEIC are not supported) and not an "
@@ -357,6 +462,7 @@ def resolve_image(src: str, ucfg: dict) -> Source:
                            "file path instead.")
     log.info("page %r: %d image candidates", page.title[:70], len(page.candidates))
     min_px = int(ucfg["min_image_px"])
+    rejected = 0
     for cand in page.candidates[:int(ucfg["max_candidates"])]:
         try:
             fi = fetch_bytes(cand, ucfg, referer=f.url)
@@ -372,8 +478,16 @@ def resolve_image(src: str, ucfg: dict) -> Source:
         if min(im.shape[:2]) < min_px:
             log.info("candidate %s is only %dx%d; next", cand[:120], im.shape[1], im.shape[0])
             continue
+        why = check(im) if check else None
+        if why:
+            rejected += 1
+            log.info("candidate %s: %s; next", cand[:120], why)
+            continue
         log.info("product image %s (%dx%d)", fi.url[:140], im.shape[1], im.shape[0])
         return Source(im, fi.data, fi.url, f.url, page.title)
+    if rejected:
+        raise UnusableImageError(f"{host}: only on-model / cropped photos among the first {ucfg['max_candidates']} "
+                                 f"page images ({rejected} rejected); {SAVE_FLAT_HINT}")
     raise RuntimeError(f"{host}: none of the first {ucfg['max_candidates']} page images was a usable product "
                        f"photo (>= {min_px} px). Save the image in a browser and pass the file path instead.")
 
@@ -643,19 +757,46 @@ def describe(folder: Path, cfg: dict) -> str:
             f"thumb {o.thumb.shape[1]}x{o.thumb.shape[0]}")
 
 
+def _seg_model_path(config_path: Path = ROOT / "config.yaml") -> str:
+    """tracker.mediapipe.seg_model of the full config ("" when absent)."""
+    try:
+        full = yaml.safe_load(Path(config_path).read_text())
+        return str(full["tracker"]["mediapipe"]["seg_model"])
+    except (OSError, KeyError, TypeError, yaml.YAMLError):
+        return ""
+
+
 def make_outfit_from_url(src: str, cfg: dict, *, part: str = "auto", name: str | None = None,
                          sleeve: str | None = None, pair_with: str | None = None, out: Path | None = None,
                          garments_dir: Path | None = None, sources_md: Path | None = None,
                          white: int | None = None, bg_dist: float | None = None, gamma: float | None = None,
-                         size_table: str | None = None, credit: str | None = None, force: bool = False) -> Path:
+                         size_table: str | None = None, credit: str | None = None, force: bool = False,
+                         allow_model: bool = False, seg_model: str | Path | None = None) -> Path:
     """Fetch -> cut out -> classify -> pair -> write -> verify. Returns the written outfit folder.
 
-    `cfg` is config["garments"] completed with fitcast.garments.DEFAULTS (prepare_garments.load_config)."""
+    `cfg` is config["garments"] completed with fitcast.garments.DEFAULTS (prepare_garments.load_config).
+    `seg_model` None = config.yaml tracker.mediapipe.seg_model; "" disables the on-model check (the frame-edge
+    check still runs); `allow_model` disables both."""
     ucfg = url_cfg(cfg)
     gdir = Path(garments_dir or cfg["dir"])
     gdir = gdir if gdir.is_absolute() else ROOT / gdir
-    source = resolve_image(src, ucfg)
+    detector = None
+    if allow_model:
+        log.warning("--allow-model: on-model / cropped photos are accepted; a person in the photo ends up in the "
+                    "garment texture")
+        check = None
+    else:
+        detector = ModelShotDetector(_seg_model_path() if seg_model is None else seg_model, ucfg)
+        check = functools.partial(reject_reason, cfg=cfg, ucfg=ucfg, detector=detector, white=white,
+                                  bg_dist=bg_dist)
+    try:
+        source = resolve_image(src, ucfg, check)
+    finally:
+        if detector is not None:
+            detector.close()
     rgba = cut_garment(source.image, cfg, ucfg, white, bg_dist, gamma)
+    if part == "auto" and not name and not source.title:
+        log.info("no page title: part/sleeve come from the URL / file name and the cut-out shape")
     text = " ".join(filter(None, [source.title, urllib.parse.urlparse(source.page_url or "").path,
                                   urllib.parse.urlparse(source.image_url).path, name or ""]))
     if part == "auto":
@@ -693,7 +834,7 @@ def make_outfit_from_url(src: str, cfg: dict, *, part: str = "auto", name: str |
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point; returns the process exit code (2 = the site blocked the download)."""
+    """CLI entry point; exit code 0 ok, 1 error, 2 the site blocked the download, 3 only on-model photos."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("src", help="product page URL, direct image URL, file:// URL or local image path")
     ap.add_argument("--part", choices=("top", "bottom", "auto"), default="auto")
@@ -711,6 +852,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     ap.add_argument("--garments-dir", type=Path, help="default: config garments.dir")
     ap.add_argument("--force", action="store_true", help="replace an existing --out folder not made by this script")
+    ap.add_argument("--allow-model", action="store_true",
+                    help="accept on-model / cropped photos (the person ends up in the texture)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -720,10 +863,14 @@ def main(argv: list[str] | None = None) -> int:
         make_outfit_from_url(args.src, cfg, part=args.part, name=args.name, sleeve=args.sleeve,
                              pair_with=args.pair_with, out=args.out, garments_dir=args.garments_dir,
                              white=args.white, bg_dist=args.bg_dist, gamma=args.gamma,
-                             size_table=args.size_table, credit=args.credit, force=args.force)
+                             size_table=args.size_table, credit=args.credit, force=args.force,
+                             allow_model=args.allow_model, seg_model=_seg_model_path(args.config))
     except BlockedError as e:
         log.error("%s", e)
         return 2
+    except UnusableImageError as e:
+        log.error("%s", e)
+        return 3
     except ValueError as e:
         log.error("%s. Product shots on a plain light background cut out best; try --white 250 for a white "
                   "garment, --bg-dist 0, or another image of the item", e)

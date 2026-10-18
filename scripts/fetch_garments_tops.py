@@ -68,7 +68,11 @@ OWN_LICENSES = ALLOWED_LICENSES + ("CC BY 2.0 (Flickr)",)
 # key -> photo + cut-out hints (same keys as fetch_garments.MANIFEST; see the comment block there), plus:
 #   title / back_title: Commons file of the front / back view
 #   url / back_url + page_url, license, license_url, author: direct download with a hand-recorded licence
-#   region: manual top_body_region override
+#   region: manual top_body_region override (long sleeves hanging past the hem fool the alpha estimate)
+#   erase: polygons (normalized full-photo x, y) cut out of the mask (mannequin neck forms, props)
+#   keep: polygons the mask is clipped to (hand-traced outline when the garment edge has no contrast)
+#   print_box: list of normalized canvas boxes the chest-print mask is limited to (default: torso region)
+#   back_hints: overrides of the cut-out hints for the back photo
 TOPS: dict[str, dict] = {
     "jersey_lakers": dict(
         url="https://live.staticflickr.com/7390/15873625204_42534ace80_b.jpg",
@@ -76,9 +80,11 @@ TOPS: dict[str, dict] = {
         title="ballcap hat Lakers jersey basketball pink roses poms game tickets shoes alstroemeria lilies",
         license="CC BY 2.0", license_url="https://creativecommons.org/licenses/by/2.0/", author="ProFlowers.com",
         crop=(0.215, 0.355, 0.795, 0.965), white=246, bg_dist=0, smooth=True, print_dist=45,
-        print_box=(0.24, 0.13, 0.78, 0.63),
-        erase=[[(0.20, 0.34), (0.31, 0.34), (0.31, 0.52), (0.20, 0.52)],      # sneaker
-               [(0.745, 0.34), (0.80, 0.34), (0.80, 0.52), (0.745, 0.52)]],  # game tickets
+        print_box=[(0.27, 0.13, 0.73, 0.27), (0.22, 0.30, 0.79, 0.63)],   # logos; wordmark + number
+        keep=[[(0.331, 0.386), (0.413, 0.361), (0.610, 0.366), (0.683, 0.400), (0.673, 0.460),  # traced outline:
+               (0.670, 0.498), (0.686, 0.530), (0.729, 0.557), (0.776, 0.569), (0.786, 0.600),  # white edges on
+               (0.786, 0.962), (0.226, 0.962), (0.225, 0.577), (0.266, 0.562), (0.305, 0.548),  # a white table
+               (0.334, 0.525), (0.344, 0.484), (0.340, 0.426)]],
         desc="white Los Angeles Lakers #24 (Kobe Bryant) adidas swingman jersey, purple/gold trim (flat-lay; "
              "cropped out of a styled flat-lay with cap, shoes, ball and flowers)"),
     "tee_welders": dict(
@@ -98,13 +104,13 @@ TOPS: dict[str, dict] = {
         title="Basketball jersey for Lockland Wayne High School (NMAAHC 2016.140.1.1)",
         license="CC0", license_url="https://creativecommons.org/publicdomain/zero/1.0/",
         author="Smithsonian National Museum of African American History and Culture (maker: P. Goldsmith & Sons)",
-        bg_dist=45, print_dist=40,
+        bg_dist=45, gamma=0.7,
         desc='royal-blue mesh "WAYNE 14" vintage basketball shirt with gold striped shoulders, front + back photo'),
     "sweatshirt_lenders": dict(
         title="File:Lender's Sweatshirt (15844939901).jpg", print_dist=40,
         desc="red fleece crewneck sweatshirt with white Lender's Bagels logo (sleeves folded across the front)"),
     "flannel_buffalo": dict(
-        title="File:Polo Ralph Lauren winter jacket, red and black plaid.jpg", attribution=SHEIE, open_frac=0.012,
+        title="File:Polo Ralph Lauren winter jacket, red and black plaid.jpg", attribution=SHEIE, open_frac=0.012, gamma=0.6,
         erase=[[(0.413, 0.0), (0.562, 0.0), (0.556, 0.084), (0.548, 0.147), (0.531, 0.191), (0.500, 0.242),
                 (0.482, 0.231), (0.447, 0.182), (0.420, 0.142), (0.411, 0.084)]],
         region=(0.19, 0.0, 0.84, 0.84),
@@ -204,8 +210,9 @@ def _photo_jobs() -> list[tuple[str, str, dict]]:
     return jobs
 
 
-def fetch(raw_dir: Path) -> dict[str, dict]:
-    """Download every TOPS photo into `raw_dir`, write sources.json; returns stem -> source record."""
+def fetch(raw_dir: Path, refetch: bool = False) -> dict[str, dict]:
+    """Download every TOPS photo into `raw_dir` (already-downloaded ones only with `refetch`), write
+    sources.json; returns stem -> source record."""
     raw_dir.mkdir(parents=True, exist_ok=True)
     jobs = _photo_jobs()
     info = commons_info([r["title"] for _, _, r in jobs if "url" not in r])
@@ -220,6 +227,8 @@ def fetch(raw_dir: Path) -> dict[str, dict]:
             log.error("%s: license %r is not allowed; skipped", stem, rec["license"])
             continue
         path = raw_dir / f"{stem}.jpg"
+        if path.is_file() and not refetch and stem in sources:
+            continue
         try:
             path.write_bytes(_get(rec["url"]))
         except RuntimeError as e:
@@ -241,9 +250,10 @@ def fetch(raw_dir: Path) -> dict[str, dict]:
 # ----------------------------------------------------------------------------- build
 
 def cut_photo(bgr: np.ndarray, m: dict, cfg: dict) -> np.ndarray:
-    """fetch_garments.garment_rgba plus `erase`: polygons (normalized full-photo coords) forced transparent
-    after the cut-out, for mannequin neck forms the garment's collar encloses. Returns the tight RGBA crop."""
-    if not m.get("erase"):
+    """fetch_garments.garment_rgba plus `keep` / `erase` polygons (normalized full-photo coords) applied to
+    the cut-out mask: `keep` = hand-traced outline the mask is clipped to (white garment on a white table),
+    `erase` = regions forced transparent (mannequin neck forms the collar encloses). Returns the tight RGBA crop."""
+    if not (m.get("erase") or m.get("keep")):
         return garment_rgba(bgr, int(m.get("white", cfg["white_bg_threshold"])), m.get("crop"),
                             float(m.get("bg_dist", BG_DIST)), float(m.get("gamma", 1.0)),
                             float(m.get("open_frac", 0.0)), bool(m.get("smooth", False)))
@@ -255,9 +265,16 @@ def cut_photo(bgr: np.ndarray, m: dict, cfg: dict) -> np.ndarray:
         bgr = cv2.resize(bgr, (round(bgr.shape[1] * s), round(bgr.shape[0] * s)), interpolation=cv2.INTER_AREA)
     mask = cutout(bgr, int(m.get("white", cfg["white_bg_threshold"])), float(m.get("bg_dist", BG_DIST)),
                   float(m.get("open_frac", 0.0)))
-    for poly in m["erase"]:
-        pts = np.array([[(px * w - round(x0 * w)) * s, (py * h - round(y0 * h)) * s] for px, py in poly])
-        cv2.fillPoly(mask, [pts.round().astype(np.int32)], 0)
+    def to_px(poly: list) -> np.ndarray:
+        pts = [[(px * w - round(x0 * w)) * s, (py * h - round(y0 * h)) * s] for px, py in poly]
+        return np.array(pts).round().astype(np.int32)
+
+    if m.get("keep"):
+        keep = np.zeros_like(mask)
+        cv2.fillPoly(keep, [to_px(poly) for poly in m["keep"]], 255)
+        mask &= keep
+    for poly in m.get("erase", []):
+        cv2.fillPoly(mask, [to_px(poly)], 0)
     mask = _largest_blob(mask)
     if m.get("smooth"):
         bgr = cv2.bilateralFilter(bgr, SMOOTH_D, SMOOTH_SIGMA_COLOR, SMOOTH_SIGMA_SPACE)
@@ -289,7 +306,7 @@ def load_top(key: str, raw_dir: Path, cfg: dict):
     """(front canvas, front-only print mask or None, top_body_region, back canvas or None) for a TOPS key.
 
     A real back photo is used when there is one; otherwise the print mask (torso pixels far from the
-    fabric colour, limited to `print_box` when given) tells synthesize_back what to replace with fabric."""
+    fabric colour, limited to the `print_box` list when given) tells synthesize_back what to replace with fabric."""
     m = TOPS[key]
     front = _cut(raw_dir, key, m, cfg)
     has_back = (raw_dir / f"{key}_back.jpg").is_file() and (m.get("back_title") or m.get("back_url"))
@@ -299,7 +316,10 @@ def load_top(key: str, raw_dir: Path, cfg: dict):
         front = flatten_chroma(front, float(m["print_dist"]))
     detail = None
     if m.get("print_dist") and back is None:
-        detail = print_mask(front, tuple(m.get("print_box") or region), float(m["print_dist"]))
+        boxes = m.get("print_box") or [region]
+        detail = np.zeros(front.shape[:2], np.uint8)
+        for box in boxes:
+            detail |= print_mask(front, tuple(box), float(m["print_dist"]))
     return front, detail, region, back
 
 
@@ -416,6 +436,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("step", nargs="?", choices=("all", "fetch", "build"), default="all")
     ap.add_argument("--config", type=Path, default=ROOT / "config.yaml")
     ap.add_argument("--out", type=Path, help="garments dir (default: config garments.dir)")
+    ap.add_argument("--refetch", action="store_true", help="download photos again even if present")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     cfg = garment_cfg(load_config(args.config))
@@ -425,7 +446,7 @@ def main(argv: list[str] | None = None) -> int:
     raw = out / RAW_DIRNAME
     if args.step in ("all", "fetch"):
         try:
-            fetch(raw)
+            fetch(raw, args.refetch)
         except RuntimeError as e:
             log.error("%s; falling back to whatever is already in %s", e, raw)
     lines = []
