@@ -53,12 +53,15 @@ class Outfit:
 class GalleryState:
     outfits: list[Outfit]; index: int; prev_index: int; changed_at: float
     visible: bool; size_text: str; measure_text: str
+    bottom_index: int = -1            # -1: bottoms follow index; else mix-and-match (current = top of index + bottoms of bottom_index)
+    strip: str = "outfits"            # wall strip shows "outfits" | "tops" | "bottoms"
 
 renderer.draw(track: TrackResult, outfit: Outfit) -> np.ndarray      # (H, W, 4) RGBA camera space
 compositor.compose(rgba, track, gallery_state, now=None) -> np.ndarray   # (H, W, 3) BGR camera space; `now` = perf_counter (tests)
 calibration.to_projector(img_cam) -> np.ndarray                      # (1080, 1920, 3) BGR
 calibration.load(path=None, allow_simulated=False) -> bool           # simulated files only for video-file sources
-gestures.update(track) -> list[str]                                  # events: "next" | "prev" | "toggle_gallery"
+gestures.update(track) -> list[str]                                  # events: "next" | "prev" | "toggle_gallery" | "calibrate";
+                                                                     # zone swipes: "next_top" | "prev_top" | "next_bottom" | "prev_bottom"
 sizing.update(track) -> None ; sizing.recommendation(size_table=None) -> tuple[str, str]  # (size_text, measure_text)
 ```
 

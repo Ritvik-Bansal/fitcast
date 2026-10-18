@@ -188,10 +188,28 @@ class App:
 
     # -- outfit control -----------------------------------------------------------------------
     def set_outfit(self, idx: int, now: float) -> None:
+        """Whole outfit (keys / auto-cycle): bottoms follow the top again."""
         g = self.gallery
         g.prev_index, g.index = g.index, idx % len(g.outfits)
-        g.changed_at = now
+        g.bottom_index, g.strip, g.changed_at = -1, "outfits", now
         log.info("outfit -> %s", g.current.name)
+
+    def set_top(self, idx: int, now: float) -> None:
+        """Swipe above the hips: change the top only; the bottoms stay."""
+        g = self.gallery
+        if g.bottom_index < 0:
+            g.bottom_index = g.index
+        g.prev_index, g.index = g.index, idx % len(g.outfits)
+        g.strip, g.changed_at = "tops", now
+        log.info("top -> %s", g.current.name)
+
+    def set_bottom(self, idx: int, now: float) -> None:
+        """Swipe below the hips: change the bottoms only; the top stays."""
+        g = self.gallery
+        cur = g.bottom_index if g.bottom_index >= 0 else g.index
+        g.prev_index, g.bottom_index = cur, idx % len(g.outfits)
+        g.strip, g.changed_at = "bottoms", now
+        log.info("bottoms -> %s", g.current.name)
 
     def handle_key(self, k: int, now: float) -> bool:
         """Returns False when the app should quit."""
@@ -537,6 +555,11 @@ class App:
                 self.set_outfit(self.gallery.index + 1, now)
             elif ev == "prev":
                 self.set_outfit(self.gallery.index - 1, now)
+            elif ev in ("next_top", "prev_top"):
+                self.set_top(self.gallery.index + (1 if ev == "next_top" else -1), now)
+            elif ev in ("next_bottom", "prev_bottom"):
+                cur = self.gallery.bottom_index if self.gallery.bottom_index >= 0 else self.gallery.index
+                self.set_bottom(cur + (1 if ev == "next_bottom" else -1), now)
             elif ev == "toggle_gallery":
                 self.gallery.visible = not self.gallery.visible
             elif ev == "calibrate":

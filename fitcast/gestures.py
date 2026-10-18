@@ -45,6 +45,8 @@ class GestureDetector:
         self._tpose_fired = False
         self.log_events = bool(cfg["log_events"])
         self.min_vis = float(cfg.get("min_wrist_visibility", _DEFAULT_MIN_WRIST_VISIBILITY))
+        self.zone_swipes = bool(cfg.get("zone_swipes", False))
+        self.zone_margin = float(cfg.get("zone_margin_sw", 0.0))
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
         self.max_velocity = float(cfg.get("max_velocity_sw_per_s", 12.0))
         self.max_travel = float(cfg.get("max_travel_sw", 2.6))
@@ -63,7 +65,8 @@ class GestureDetector:
         self._raise_fired = False
 
     def update(self, track: TrackResult) -> list[str]:
-        """Feed one frame; return [] or one of ["next"], ["prev"], ["toggle_gallery"].
+        """Feed one frame; return [] or one of ["next"], ["prev"], ["toggle_gallery"], ["calibrate"];
+        with `zone_swipes` the swipe events carry a zone suffix: "next_top", "prev_bottom", ...
 
         Gestures are ignored (and history cleared) while ``track.ok`` is False
         or the person is not facing the camera ("back"/"side"). No events at
@@ -88,6 +91,7 @@ class GestureDetector:
         span = (float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - nose_y
         band_top = nose_y + self.band_top_frac * span
         band_bottom = nose_y + self.band_bottom_frac * span
+        hip_ny = ((float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - cy) / sw   # hip line, shoulder-width units
 
         if self._raise_hands(now, j, vis, nose_y):
             return ["toggle_gallery"]
@@ -114,6 +118,10 @@ class GestureDetector:
                 buf.clear()                 # faster/farther than an arm can move: a landmark jump, not a swipe
                 continue
             event = self._direction(dx)
+            if self.zone_swipes:
+                # swipe above the hips -> tops, below -> bottoms (mix-and-match)
+                mean_ny = sum(b[2] for b in buf) / len(buf)
+                event += "_top" if mean_ny < hip_ny - self.zone_margin else "_bottom"
             self._cooldown_until = now + self.cooldown_s
             self._clear()
             if self.log_events:

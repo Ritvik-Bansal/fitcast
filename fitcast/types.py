@@ -68,7 +68,23 @@ class GalleryState:
     visible: bool = True
     size_text: str = ""
     measure_text: str = ""
+    bottom_index: int = -1              # -1 = bottoms follow `index` (whole outfit); else mix-and-match
+    strip: str = "outfits"              # wall strip shows "outfits" | "tops" | "bottoms"
+    _mix: dict = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def current(self) -> Outfit:
-        return self.outfits[self.index]
+        """The outfit to render: `index` whole, or its top combined with `bottom_index`'s bottoms."""
+        top = self.outfits[self.index]
+        if self.bottom_index < 0 or self.bottom_index == self.index:
+            return top
+        key = (self.index, self.bottom_index)
+        o = self._mix.get(key)
+        if o is None:
+            bot = self.outfits[self.bottom_index]
+            o = Outfit(id=f"{top.id}+{bot.id}", name=f"{top.name.split(' + ')[0]} + {bot.name.split(' + ')[-1]}",
+                       sleeve=top.sleeve, top_front=top.top_front, top_back=top.top_back, sleeve_tex=top.sleeve_tex,
+                       bottom_front=bot.bottom_front, bottom_back=bot.bottom_back, thumb=top.thumb,
+                       size_table=top.size_table, top_body_region=top.top_body_region)
+            self._mix[key] = o
+        return o

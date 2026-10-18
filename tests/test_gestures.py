@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 
 import pytest
+import numpy as np
 import yaml
 
 from fitcast.gestures import GestureDetector
@@ -23,6 +24,7 @@ def load_cfg(**overrides: object) -> dict:
     """The real gestures config, optionally with keys overridden."""
     path = Path(__file__).resolve().parents[1] / "config.yaml"
     cfg = dict(yaml.safe_load(path.read_text())["gestures"])
+    cfg["zone_swipes"] = False          # direction tests check the bare event names; zones are tested separately
     cfg.update(overrides)
     return cfg
 
@@ -211,3 +213,29 @@ def test_landmark_jump_is_not_a_swipe(config):
         tr = make_track(ts=t); tr.joints[15, 0] = 740 + 30 - 700; tr.joints[15, 1] = 350   # 3.5 sw jump
         assert det.update(tr) == []
         t += 1 / 30
+
+
+def test_zone_swipes_tag_top_and_bottom():
+    """With zone swipes on, a swipe above the hips is a *_top event and below the hips a *_bottom event."""
+    import yaml
+    from fitcast.gestures import GestureDetector as Gestures
+    cfg = dict(yaml.safe_load(open("config.yaml"))["gestures"])
+    cfg["zone_swipes"] = True
+    for wrist_dy, suffix in ((0.3, "_top"), (1.4, "_bottom")):      # shoulder-width units below the shoulder line
+        g = Gestures(cfg)
+        events = []
+        for i in range(12):
+            t = i / 30.0
+            j = np.zeros((33, 3), np.float32); v = np.ones(33, np.float32)
+            j[0] = (640, 200, 0)                                        # nose
+            j[11] = (690, 300, 0); j[12] = (590, 300, 0)                # shoulders (sw = 100)
+            j[23] = (670, 410, 0); j[24] = (610, 410, 0)                # hips
+            j[25] = (670, 560, 0); j[26] = (610, 560, 0)
+            j[13] = (720, 360, 0); j[14] = (560, 360, 0)
+            x = 540 + i * 25                                            # left wrist sweeps image +x, 300 px in 0.37 s
+            j[15] = (x, 300 + wrist_dy * 100, 0); j[16] = (560, 420, 0)
+            tr = TrackResult(ok=True, joints=j, visibility=v, clothes_mask=np.zeros((720, 1280), np.uint8),
+                             head_box=(600, 100, 680, 220), facing="front", timestamp=t, shoulder_width=100.0,
+                             ref_shoulder_width=100.0, person_mask=None, facing_ratio=1.0)
+            events += g.update(tr)
+        assert events and all(e.endswith(suffix) for e in events), (suffix, events)

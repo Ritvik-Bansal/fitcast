@@ -108,10 +108,26 @@ class Compositor:
 
     # -- gallery -------------------------------------------------------------------------------
     def _thumb(self, gallery: GalleryState, idx: int, size: int) -> np.ndarray:
-        key = (idx, size)
+        key = (gallery.strip, idx, size)
         t = self._thumb_cache.get(key)
         if t is None:
-            t = cv2.resize(gallery.outfits[idx].thumb, (size, size), interpolation=cv2.INTER_AREA)
+            o = gallery.outfits[idx]
+            part = o.top_front if gallery.strip == "tops" else o.bottom_front if gallery.strip == "bottoms" else None
+            if part is None:
+                t = cv2.resize(o.thumb, (size, size), interpolation=cv2.INTER_AREA)
+            else:
+                # one garment part over the panel background, letterboxed into a square
+                bg = np.array(self.g["bg_color"], np.float32)
+                h, w = part.shape[:2]
+                sc = (size - 8) / max(h, w)
+                rs = cv2.resize(part, (max(1, int(w * sc)), max(1, int(h * sc))), interpolation=cv2.INTER_AREA)
+                a = rs[:, :, 3:4].astype(np.float32) / 255.0
+                tile = np.empty((size, size, 3), np.float32)
+                tile[:] = bg
+                y0, x0 = (size - rs.shape[0]) // 2, (size - rs.shape[1]) // 2
+                roi = tile[y0:y0 + rs.shape[0], x0:x0 + rs.shape[1]]
+                roi[:] = rs[:, :, :3].astype(np.float32) * a + roi * (1.0 - a)
+                t = tile.astype(np.uint8)
             self._thumb_cache[key] = t
         return t
 
@@ -130,9 +146,10 @@ class Compositor:
         big = int(ts * scale)
         vertical = ph >= pw
         spacing = int(ts * 1.25)
-        # animated virtual index
+        # animated virtual index (the strip follows whichever part was swiped last)
+        cur = gal.bottom_index if (gal.strip == "bottoms" and gal.bottom_index >= 0) else gal.index
         t = _ease((now - gal.changed_at) / (float(g["anim_ms"]) / 1000.0)) if g["anim_ms"] > 0 else 1.0
-        d = gal.index - gal.prev_index
+        d = cur - gal.prev_index
         if abs(d) > n / 2:  # wrap-around: take the short way
             d -= np.sign(d) * n
         vidx = gal.prev_index + d * t
@@ -142,7 +159,7 @@ class Compositor:
         cx, cy = pw // 2, (ph - text_h) // 2
         half_vis = int(g["thumbs_visible"]) // 2
         for k in range(-half_vis - 1, half_vis + 2):
-            i = (gal.index + k) % n
+            i = (cur + k) % n
             off = (i - vidx)
             if off > n / 2:
                 off -= n
@@ -150,7 +167,7 @@ class Compositor:
                 off += n
             if abs(off) > half_vis + 0.999:
                 continue
-            is_cur = (i == gal.index)
+            is_cur = (i == cur)
             s = big if is_cur else ts
             px, py = (cx, int(cy + off * spacing)) if vertical else (int(cx + off * spacing), cy)
             tx0, ty0 = px - s // 2, py - s // 2
@@ -161,6 +178,8 @@ class Compositor:
             if is_cur:
                 cv2.rectangle(panel, (tx0 - 3, ty0 - 3), (tx1 + 2, ty1 + 2), accent, 3)
         fs = float(g["font_scale"])
+        if gal.strip != "outfits":
+            cv2.putText(panel, gal.strip.upper(), (8, int(22 * fs / 0.55)), cv2.FONT_HERSHEY_SIMPLEX, fs * 0.8, accent, 1, cv2.LINE_AA)
         lines = [gal.current.name, gal.size_text, gal.measure_text, "Size is an estimate"]
         y = ph - text_h + int(18 * fs / 0.55)
         for li, line in enumerate(lines):
