@@ -460,6 +460,7 @@ class Tracker:
         # zero visibility for landmarks outside the frame (knees below the frame still report 0.6+)
         inside = ((joints[:, 0] >= self.margin) & (joints[:, 0] <= self.W - self.margin) &
                   (joints[:, 1] >= self.margin) & (joints[:, 1] <= self.H - self.margin))
+        inside[[L_HIP, R_HIP]] = True      # hips off-frame still anchor the torso quad (clipped by the frame)
         vis = np.where(inside, vis, 0.0).astype(np.float32)
 
         # segmentation (every N frames; reuse previous category mask otherwise)

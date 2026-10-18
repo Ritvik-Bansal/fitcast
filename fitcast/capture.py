@@ -35,11 +35,17 @@ def list_cameras(max_index: int = 5) -> list[str]:
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
             ok, f = cap.read()
+            for _ in range(5):          # skip warm-up frames before judging brightness
+                ok, f = cap.read()
             shape = f.shape if ok else None
-            lines.append(f"index {i}: open, frame {shape}, backend {cap.getBackendName()}")
+            note = ""
+            if ok and float(f.mean()) < 3.0:
+                note = "  <- frames are BLACK (iPhone locked / covered / Continuity Camera idle?)"
+            lines.append(f"index {i}: open, frame {shape}, backend {cap.getBackendName()}{note}")
         else:
             lines.append(f"index {i}: not available")
         cap.release()
+    lines.append("Note: when an iPhone is nearby it usually takes index 0 and the built-in camera moves to index 1.")
     lines.append("If every index is 'not available' on macOS, grant Camera access to your terminal app in "
                  "System Settings > Privacy & Security > Camera, then retry.")
     for ln in lines:

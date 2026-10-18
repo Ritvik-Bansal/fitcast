@@ -33,3 +33,5 @@
 - Keys: `d` is debug-overlay only (was also 'next'); outfit keys are arrows + n/p.
 - `mp.Image(..., data=arr)` copies `arr` (checked: zeroing the source after construction leaves `numpy_view()` intact), so the double-buffered RGB handoff to the segmenter worker cannot race even when submits are skipped.
 - Demo idle timer resets on operator input (keys, swipes) only; `set_outfit` itself must not reset it or the auto-cycle waits `idle_s` between every change.
+- Hips keep their visibility when they fall outside the frame (person close to the camera): the torso quad is anchored on the predicted hips and clipped by the frame; legs/arms still need in-frame landmarks. Sizing additionally requires the torso inside the frame.
+- Live test with the MacBook camera (2026-10-17 17:07): 27 fps with debug+recording, 6 real swipes detected, tracking survives bystanders; the iPhone nearby takes camera index 0 and streams black when locked.

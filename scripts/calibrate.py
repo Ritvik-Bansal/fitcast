@@ -272,8 +272,21 @@ def pick_gallery_rect(rig: LiveRig, cal: Calibration, default: list[int] | None)
             return rect if rect is not None else default
 
 
-def live_session(rig: LiveRig, config: dict, out: str) -> None:
-    """One pass of the live steps (a)-(g); returns after saving. Raises Restart/Quit."""
+def _dump_debug(lit: np.ndarray, dark: np.ndarray, cam: np.ndarray | None, path: str) -> None:
+    """Write lit frame (+ numbered detections) and dark frame side by side for remote inspection."""
+    vis = lit.copy()
+    if cam is not None:
+        for i, (x, y) in enumerate(cam):
+            cv2.circle(vis, (int(x), int(y)), 8, (0, 255, 0), 2)
+            cv2.putText(vis, str(i), (int(x) + 10, int(y) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(path, np.hstack([vis, dark]))
+
+
+def live_session(rig: LiveRig, config: dict, out: str, auto: bool = False) -> None:
+    """One pass of the live steps (a)-(g); returns after saving. Raises Restart/Quit.
+    `auto`: no keyboard/mouse at all: accept detections, gallery rect from config, save immediately;
+    detection failure writes out/calib_debug.jpg and raises RuntimeError."""
     cfg = config["calibration"]
     rows = int(cfg["marker_grid"][1])
     pts = marker_points(cfg)
@@ -287,7 +300,14 @@ def live_session(rig: LiveRig, config: dict, out: str) -> None:
     lit = capture_pattern(render_markers(cfg, pts), rig.capture, rig.show, settle)
     # (c) detect, confirm, or click by hand
     cam = detect_markers(lit, dark, cfg, len(pts), rows)
-    if cam is not None:
+    _dump_debug(lit, dark, cam, "out/calib_debug.jpg")
+    if auto:
+        if cam is None:
+            raise RuntimeError("marker detection failed (see out/calib_debug.jpg): dim the room, check the "
+                               "projector is on the second display, or run without --auto and click the markers")
+        print(f"detected {len(cam)} markers automatically (out/calib_debug.jpg)")
+        rig.points = cam
+    elif cam is not None:
         rig.points = cam
         rig.status(f"Step 3/6: detected {len(cam)} markers (numbered in grid order)",
                    "ENTER accept   m click by hand   r restart   q quit")
@@ -313,7 +333,7 @@ def live_session(rig: LiveRig, config: dict, out: str) -> None:
     print(f"reprojection error: {err:.3f} px (RMS, projector px)")
     # (e) gallery rectangle
     default = [int(v) for v in config["compositor"]["gallery"]["rect"]]
-    cal.data.gallery_rect = pick_gallery_rect(rig, cal, default)
+    cal.data.gallery_rect = default if auto else pick_gallery_rect(rig, cal, default)
     rig.rect = cal.data.gallery_rect
     # (f) verification grid
     rig.status("Step 5/6: projecting verification grid", "r restart   q quit")
@@ -324,11 +344,12 @@ def live_session(rig: LiveRig, config: dict, out: str) -> None:
     # (g) save
     rig.status(f"Step 6/6: reprojection {err:.2f} px, {verdict}",
                "s save   r restart   q quit" + ("" if passed else "   (saving an unverified calibration)"))
-    rig.reset_input()
-    while rig.take_key() != ord("s"):
-        rig.capture()
+    if not auto:
+        rig.reset_input()
+        while rig.take_key() != ord("s"):
+            rig.capture()
     cal.save(out)
-    print(f"saved {out}")
+    print(f"saved {out}: reproj {err:.3f} px, verified={passed}, gallery_rect {cal.data.gallery_rect}")
 
 
 def live(config: dict, args: argparse.Namespace, out: str) -> int:
@@ -347,8 +368,11 @@ def live(config: dict, args: argparse.Namespace, out: str) -> int:
     try:
         while True:
             try:
-                live_session(rig, config, out)
+                live_session(rig, config, out, auto=args.auto)
                 return 0
+            except RuntimeError as e:
+                print(f"CALIBRATION FAILED: {e}")
+                return 2
             except Restart:
                 print("restart")
     except Quit:
@@ -368,6 +392,8 @@ def main() -> int:
     ap.add_argument("--projector-y", type=int, default=None,
                     help="projector display origin y (default: display.projector_y, else 0)")
     ap.add_argument("--simulate", action="store_true", help="headless run against a fake rig")
+    ap.add_argument("--auto", action="store_true",
+                    help="live mode without any keyboard/mouse: auto-detect, config gallery rect, save at once")
     ap.add_argument("--out", default=None,
                     help="output file (default: calibration.file; --simulate defaults to calibration.sim_file "
                          "so a fake homography never shadows a real one)")

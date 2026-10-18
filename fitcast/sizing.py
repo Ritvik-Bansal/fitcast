@@ -135,6 +135,10 @@ class SizeEstimator:
         vis = track.visibility >= self._min_vis
         if not vis[[L_SHOULDER, R_SHOULDER, L_HIP, R_HIP]].all():
             return None
+        h, w = track.clothes_mask.shape[:2]
+        core = xy[[L_SHOULDER, R_SHOULDER, L_HIP, R_HIP]]
+        if (core < 0).any() or (core[:, 0] >= w).any() or (core[:, 1] >= h).any():
+            return None                      # torso must be fully inside the frame to measure it
         sh_c = (xy[L_SHOULDER] + xy[R_SHOULDER]) / 2
         hip_c = (xy[L_HIP] + xy[R_HIP]) / 2
         torso_px = float(np.linalg.norm(hip_c - sh_c))
