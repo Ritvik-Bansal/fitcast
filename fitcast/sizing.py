@@ -31,6 +31,7 @@ class Measurements:
     inseam_cm: float | None   # None when ankles/knees are not visible
     px_per_cm: float
     n_frames: int
+    ankles: bool = False      # scale came from nose->ankle (True) or the shoulder->hip fallback (False)
 
 
 def recommend_size(value_cm: float, table: dict, measure: str | None = None) -> str:
@@ -50,6 +51,7 @@ class SizeEstimator:
 
     def __init__(self, cfg: dict, height_cm: float | None = None) -> None:
         self._min_frontal = float(cfg.get("min_frontal_ratio", 0.0))
+        self._min_ankle_frames = int(cfg.get("min_ankle_frames", 10))
         """`cfg` is `config["sizing"]`; `height_cm` defaults to `cfg["height_cm"]`."""
         self.cfg = cfg
         self._min_vis = float(cfg.get("min_visibility", _DEFAULTS["min_visibility"]))
@@ -87,9 +89,15 @@ class SizeEstimator:
 
     def measurements(self) -> Measurements | None:
         """Mean measurements over the last `average_frames` accepted frames, or None before any."""
-        buf = self._buf
+        buf = list(self._buf)
         if not buf:
             return None
+        # never mix the two scale methods (they differ by up to 2x): prefer ankle-based frames when enough exist
+        with_ankles = [m for m in buf if m.ankles]
+        if len(with_ankles) >= self._min_ankle_frames:
+            buf = with_ankles
+        else:
+            buf = [m for m in buf if not m.ankles] or buf
         inseams = [m.inseam_cm for m in buf if m.inseam_cm is not None]
         return Measurements(
             shoulder_cm=fmean(m.shoulder_cm for m in buf),
@@ -98,6 +106,7 @@ class SizeEstimator:
             inseam_cm=fmean(inseams) if inseams else None,
             px_per_cm=fmean(m.px_per_cm for m in buf),
             n_frames=len(buf),
+            ankles=all(m.ankles for m in buf),
         )
 
     def recommendation(self, size_table: str | None = None) -> tuple[str, str]:
@@ -165,6 +174,7 @@ class SizeEstimator:
             inseam_cm=None if inseam_px is None else inseam_px / px_per_cm,
             px_per_cm=px_per_cm,
             n_frames=1,
+            ankles=ankles_seen,
         )
 
     def _chest_px(self, mask: np.ndarray, sh_y: float, hip_y: float, shoulder_px: float) -> float:

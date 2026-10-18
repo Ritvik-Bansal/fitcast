@@ -419,6 +419,9 @@ class Tracker:
         self.fallback_active = False
         self.last_person_mask: np.ndarray | None = None
         self.timings: dict[str, float] = {}
+        self.roi: tuple[int, int, int, int] | None = None   # x0,y0,x1,y1 camera px: models only see this crop
+        self._person_full = np.zeros((self.H, self.W), np.float32)
+        self._cat_roi: np.ndarray | None = None
 
     # -- controls --------------------------------------------------------------------------
     def cycle_mask_mode(self) -> str:
@@ -428,6 +431,24 @@ class Tracker:
 
     def reset_reference(self) -> None:
         self.facing.reset()
+
+    def set_roi(self, rect: tuple[int, int, int, int] | None, margin_frac: float = 0.0) -> None:
+        """Restrict pose + segmentation to a camera-space rectangle (e.g. the projector's footprint): bystanders
+        outside the beam are never tracked and the subject gets more model resolution. None = full frame."""
+        if rect is None:
+            self.roi = None
+            return
+        x0, y0, x1, y1 = rect
+        mx, my = margin_frac * (x1 - x0), margin_frac * (y1 - y0)
+        x0, y0 = int(max(0, x0 - mx)), int(max(0, y0 - my))
+        x1, y1 = int(min(self.W, x1 + mx)), int(min(self.H, y1 + my))
+        x0, y0 = x0 - (x0 % 2), y0 - (y0 % 2)                 # even offsets keep colour conversions aligned
+        if x1 - x0 < 64 or y1 - y0 < 64:
+            log.warning("tracker ROI %s too small; ignoring", rect)
+            self.roi = None
+            return
+        self.roi = (x0, y0, x1, y1)
+        log.info("tracker ROI set to %s (%dx%d of %dx%d)", self.roi, x1 - x0, y1 - y0, self.W, self.H)
 
     def close(self) -> None:
         if self.worker is not None:
@@ -440,7 +461,16 @@ class Tracker:
         """Run pose (+ segmentation every N frames) and build the TrackResult for this frame."""
         t0 = time.perf_counter()
         ms = self.backend.timestamp_ms(ts)
-        joints, vis, person = self.backend.detect(frame_bgr, ms)
+        roi = self.roi
+        model_frame = frame_bgr if roi is None else np.ascontiguousarray(frame_bgr[roi[1]:roi[3], roi[0]:roi[2]])
+        joints, vis, person = self.backend.detect(model_frame, ms)
+        if roi is not None:
+            joints[:, 0] += roi[0]
+            joints[:, 1] += roi[1]
+            if person is not None:
+                self._person_full.fill(0.0)
+                self._person_full[roi[1]:roi[3], roi[0]:roi[2]] = person
+                person = self._person_full
         t1 = time.perf_counter()
         self._n += 1
         ok = bool(vis[L_SHOULDER] >= self.min_vis and vis[R_SHOULDER] >= self.min_vis and
@@ -461,17 +491,23 @@ class Tracker:
         if self.worker is not None and self.worker.failed:
             log.error("segmenter worker failed; continuing with synchronous segmentation (slower)")
             self.worker = None
+        def _store_cat(cat_small: np.ndarray) -> None:
+            if roi is None:
+                np.copyto(self._cat, cat_small)
+            else:
+                self._cat.fill(0)
+                self._cat[roi[1]:roi[3], roi[0]:roi[2]] = cat_small
         if self.worker is not None:
             if (self._n - 1) % self.seg_every == 0:
                 self._flip ^= 1
-                self._rgb_buf[self._flip] = self.backend.image_copy(frame_bgr, self._rgb_buf[self._flip])
+                self._rgb_buf[self._flip] = self.backend.image_copy(model_frame, self._rgb_buf[self._flip])
                 self.worker.submit(self._rgb_buf[self._flip][0], ms)
             cat = self.worker.latest()
             if cat is not None:
-                np.copyto(self._cat, cat)
+                _store_cat(cat)
                 seg_ms = self.worker.last_ms
         elif (self._n - 1) % self.seg_every == 0:
-            np.copyto(self._cat, self.backend.segment(frame_bgr, ms))
+            _store_cat(self.backend.segment(model_frame, ms))
         t2 = time.perf_counter()
 
         sw = geo.shoulder_width(joints)

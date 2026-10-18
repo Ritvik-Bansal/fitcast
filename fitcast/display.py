@@ -99,21 +99,56 @@ class CocoaProjector:
         self.view.layer().setContentsGravity_("resize")
         self.win.orderFrontRegardless()
         self.w, self.h = size
-        self._rgba = np.zeros((self.h, self.w, 4), np.uint8)
+        self._rgba = [np.zeros((self.h, self.w, 4), np.uint8) for _ in range(2)]
+        self._flip = 0
         self._cs = Quartz.CGColorSpaceCreateDeviceRGB()
         self.frame = (int(fr.origin.x), int(fr.origin.y), int(fr.size.width), int(fr.size.height))
+        # the window-server commit blocks ~10 ms; do it on a worker so the tracking loop never waits for it
+        import threading
+        self._cv = threading.Condition()
+        self._pending: bytes | None = None
+        self._quit = False
+        self._worker = threading.Thread(target=self._run, name="projector", daemon=True)
+        self._worker.start()
+        self.commit_ms = 0.0
 
     def show(self, bgr: np.ndarray) -> None:
+        """Hand the frame to the commit thread (latest frame wins; never queues)."""
+        self._flip ^= 1
+        buf = self._rgba[self._flip]
+        cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA, dst=buf)
+        data = buf.tobytes()
+        with self._cv:
+            self._pending = data
+            self._cv.notify()
+
+    def _run(self) -> None:
+        import time as _t
         Q = self._Q
-        cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA, dst=self._rgba)
-        data = self._rgba.tobytes()
-        provider = Q.CGDataProviderCreateWithData(None, data, len(data), None)
-        img = Q.CGImageCreate(self.w, self.h, 8, 32, self.w * 4, self._cs,
-                              Q.kCGImageAlphaNoneSkipLast | Q.kCGBitmapByteOrderDefault,
-                              provider, None, False, Q.kCGRenderingIntentDefault)
-        self.view.layer().setContents_(img)
+        while True:
+            with self._cv:
+                while self._pending is None and not self._quit:
+                    self._cv.wait()
+                if self._quit:
+                    return
+                data, self._pending = self._pending, None
+            t0 = _t.perf_counter()
+            provider = Q.CGDataProviderCreateWithData(None, data, len(data), None)
+            img = Q.CGImageCreate(self.w, self.h, 8, 32, self.w * 4, self._cs,
+                                  Q.kCGImageAlphaNoneSkipLast | Q.kCGBitmapByteOrderDefault,
+                                  provider, None, False, Q.kCGRenderingIntentDefault)
+            Q.CATransaction.begin()
+            Q.CATransaction.setDisableActions_(True)
+            self.view.layer().setContents_(img)
+            Q.CATransaction.commit()
+            Q.CATransaction.flush()
+            self.commit_ms = (_t.perf_counter() - t0) * 1e3
 
     def close(self) -> None:
+        with self._cv:
+            self._quit = True
+            self._cv.notify()
+        self._worker.join(timeout=1.0)
         try:
             self.win.orderOut_(None)
             self.win.close()
@@ -237,12 +272,16 @@ class Display:
 # Debug overlay
 # ---------------------------------------------------------------------------------------------
 def draw_debug(frame: np.ndarray, track: TrackResult, info: dict, min_vis: float = 0.5,
-               composite: np.ndarray | None = None, show_overlay: bool = True) -> np.ndarray:
-    """Camera frame + skeleton, mask tint, head box and status text. Optionally side-by-side with the composite."""
+               composite: np.ndarray | None = None, show_overlay: bool = True, mask_tint: bool = True) -> np.ndarray:
+    """Camera frame + skeleton, mask outline/tint, head box and status text. Optionally side-by-side with the composite."""
     vis = frame.copy()
     if show_overlay and track.ok:
-        tinted = cv2.addWeighted(vis, 0.55, np.full_like(vis, (0, 110, 0)), 0.45, 0)
-        cv2.copyTo(tinted, track.clothes_mask, vis)
+        if mask_tint:
+            tinted = cv2.addWeighted(vis, 0.55, np.full_like(vis, (0, 110, 0)), 0.45, 0)
+            cv2.copyTo(tinted, track.clothes_mask, vis)
+        else:   # outline only, so the real projected light on the clothes stays visible in recordings
+            cnts, _ = cv2.findContours(track.clothes_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(vis, cnts, -1, (0, 255, 0), 1)
         j, v = track.joints, track.visibility
         for a, b in BONES:
             if v[a] >= min_vis and v[b] >= min_vis:

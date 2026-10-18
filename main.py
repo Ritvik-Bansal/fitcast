@@ -56,6 +56,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     ap.add_argument("--no-window", action="store_true", help="headless: no windows, process every frame in order")
     ap.add_argument("--no-projector", action="store_true", help="debug window only (laptop-only development)")
     ap.add_argument("--no-realtime", action="store_true", help="video files: do not pace to native fps")
+    ap.add_argument("--no-roi", action="store_true", help="track the whole camera frame, not just the projector footprint")
     ap.add_argument("--loop", action="store_true", help="headless: keep looping the video file (soak tests)")
     ap.add_argument("--log-level", default=None)
     return ap.parse_args(argv)
@@ -92,6 +93,12 @@ class App:
         self.calib.load(args.calibration, allow_simulated=self.source.is_file)   # a fake homography is fine for clips, never live
         if self.calib.ok and getattr(self.calib.data, "gallery_rect", None):
             self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
+        if self.calib.ok and tcfg.get("roi_from_calibration", True) and not args.no_roi:
+            # only track inside the projector footprint (+margin): bystanders beside the rig are ignored
+            c = self.calib.unproject_points(np.array([[0, 0], [self.calib.projector_size[0], 0],
+                                                      list(self.calib.projector_size), [0, self.calib.projector_size[1]]], float))
+            self.tracker.set_roi((c[:, 0].min(), c[:, 1].min(), c[:, 0].max(), c[:, 1].max()),
+                                 float(tcfg.get("roi_margin_frac", 0.1)))
         self.gestures = GestureDetector(cfg["gestures"])
         self.sizing = SizeEstimator(cfg["sizing"], args.height)
         try:
@@ -123,6 +130,7 @@ class App:
         self.stale_s = float(cfg["capture"]["stale_ms"]) / 1000.0
         self.stall_exit_s = float(cfg["capture"]["stall_exit_s"])
         self.reopen_s = float(cfg["capture"]["reopen_s"])
+        self.pump_every = max(1, int(cfg["display"].get("pump_every_n", 1)))
         self._last_reopen = 0.0
         self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
         self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
@@ -221,7 +229,8 @@ class App:
                 inst = 1.0 / dt if dt > 0 else 0.0
                 self.fps = inst if self.fps == 0 else 0.9 * self.fps + 0.1 * inst
                 self._stats["loop"].append(dt)
-                running = self.handle_key(self.display.key(1), now)
+                if self.frames % self.pump_every == 0:
+                    running = self.handle_key(self.display.key(1), now)
                 if a.max_frames and self.frames >= a.max_frames:
                     break
                 if a.max_seconds and now - t_start >= a.max_seconds:
@@ -277,7 +286,8 @@ class App:
                     "extra": f"frame {self.frames}"}
             want_comp = self.writer is not None or bool(self.cfg["display"].get("debug_show_composite", False))
             dbg = draw_debug(frame, track, info, self.tracker.min_vis,
-                             composite=comp if want_comp else None, show_overlay=self.show_overlay)
+                             composite=comp if want_comp else None, show_overlay=self.show_overlay,
+                             mask_tint=bool(self.cfg["display"].get("mask_tint", True)))
             if self.writer is not None:
                 self.writer.write(dbg)
             if self.show_debug and not self.args.no_window and self.frames % int(self.cfg["display"]["debug_every_n"]) == 0:

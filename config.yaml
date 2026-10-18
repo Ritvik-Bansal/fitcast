@@ -28,6 +28,8 @@ tracker:
     min_score: 0.3
   seg_every_n_frames: 2     # submit the clothes segmenter every Nth frame, reuse the last mask otherwise
   seg_async: true           # run the segmenter in a worker thread (one-frame mask lag, hides ~9 ms per frame)
+  roi_from_calibration: true   # track only inside the projector footprint (+margin) when calibrated
+  roi_margin_frac: 0.10
   min_visibility: 0.5       # landmark counts as visible above this ...
   frame_margin_px: 8        # ... and when inside the frame by this many px
   mask:
@@ -155,6 +157,10 @@ calibration:
   max_blob_area_px: 6000    # larger blobs are people / glare
   min_marker_mean_diff: 20  # single-marker mode: mean difference inside the disc must exceed this
   median_frames: 3          # single-marker mode: per-pixel median of this many frames per capture
+  refine_disc_radius_px: 40 # --refine: radius of the probe disc drawn on the body (camera px)
+  refine_done_px: 4         # --refine: stop when the measured offset is below this (camera px)
+  refine_wait_s: 20         # --refine: wait this long for a tracked person before giving up
+  refine_max_px: 150        # --refine: offsets above this are rejected (wrong person / disc off the body)
 
 sizing:
   height_cm: 175            # operator enters this; --height overrides
@@ -163,6 +169,7 @@ sizing:
   average_frames: 60
   chest_mask_band_frac: [0.25, 0.60]   # fraction of shoulder->hip span searched; the narrowest row wins (below sleeves, above hem)
   min_frontal_ratio: 0.9    # only accumulate when shoulder_width / ref >= this (squarely facing the camera)
+  min_ankle_frames: 10      # use ankle-based scale once this many recent frames have it (never mix the two scales)
   default_table: mens
   min_visibility: 0.5
   chest_fallback_shoulder_frac: 1.15   # chest width = this * shoulder width when the mask band is empty
@@ -188,6 +195,8 @@ display:
   debug_every_n: 2          # redraw the laptop debug window every Nth frame (a Cocoa imshow costs ~10 ms)
   projector_sink: cocoa     # cocoa = CoreGraphics layer blit (~2 ms) | opencv = cv2.imshow (~19 ms at 1080p)
   debug_show_composite: true   # debug window shows camera overlay | projector composite side by side
+  mask_tint: false          # debug/recording: outline the mask instead of tinting it (keeps projected light visible)
+  pump_every_n: 2           # run the Cocoa event pump (waitKey, ~12 ms) every Nth frame; the projector commits every frame
   show_debug: true
 
 demo:

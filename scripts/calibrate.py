@@ -411,6 +411,102 @@ def preview(config: dict, args: argparse.Namespace, seconds: float) -> int:
     return 0
 
 
+def refine(config: dict, args: argparse.Namespace, out: str) -> int:
+    """Depth correction at the person's standing position: project discs onto the tracked body through
+    the current H, capture where they land, and shift H by the measured camera-space error.
+    The person stands still on the mark, facing the camera, arms slightly away from the body."""
+    import time
+    from fitcast.calibration import Calibration, _diff_gray, _marker_binary, capture_median
+    from fitcast.tracker import Tracker
+    from fitcast.types import L_HIP, L_SHOULDER, R_HIP, R_SHOULDER
+    cfg = config["calibration"]
+    cam_size = (int(config["capture"]["width"]), int(config["capture"]["height"]))
+    cal = Calibration(cfg, cam_size)
+    if not cal.load(out):
+        print("no calibration to refine; run the marker calibration first")
+        return 2
+    rig = LiveRig(config, args.source if args.source is not None else config["capture"]["source"],
+                  (args.projector_x or 0, args.projector_y or 0))
+    tcfg = dict(config["tracker"], seg_async=False)
+    trk = Tracker(tcfg, cam_size)
+    pw, ph = cal.projector_size
+    c = cal.unproject_points(np.array([[0, 0], [pw, 0], [pw, ph], [0, ph]], float))
+    trk.set_roi((c[:, 0].min(), c[:, 1].min(), c[:, 0].max(), c[:, 1].max()), float(tcfg.get("roi_margin_frac", 0.1)))
+    import shutil
+    shutil.copy(out, out + ".bak")
+    print(f"backup of the current calibration: {out}.bak")
+    max_e = float(cfg["refine_max_px"])
+    settle, nmed = int(cfg["settle_frames"]), int(cfg["median_frames"])
+    radius = int(cfg["refine_disc_radius_px"])
+    try:
+        for it in range(int(args.refine_passes)):
+            rig.status(f"REFINE pass {it + 1}: stand still on the mark, face the camera", "q quit")
+            rig.show(black_frame(cfg))
+            track, ok_streak, t_wait = None, 0, time.time()
+            while time.time() - t_wait < float(cfg["refine_wait_s"]):
+                f = rig.capture()
+                track = trk.process(f, time.perf_counter())
+                ok_streak = ok_streak + 1 if track.ok else 0
+                rig.status(f"REFINE pass {it + 1}: waiting for a person on the mark ({ok_streak}/10)", "q quit")
+                if ok_streak >= 10:
+                    break
+                if rig.take_key() == ord("q"):
+                    return 1
+            if track is None or not track.ok or ok_streak < 10:
+                cv2.imwrite("out/refine_noperson.jpg", f)
+                print("REFINE: no person tracked within the wait time (see out/refine_noperson.jpg)")
+                return 2
+            j = track.joints
+            sc = (j[L_SHOULDER, :2] + j[R_SHOULDER, :2]) / 2
+            hc = (j[L_HIP, :2] + j[R_HIP, :2]) / 2
+            targets = np.array([sc + 0.35 * (hc - sc), sc + 0.9 * (hc - sc)], np.float64)   # chest, lower belly
+            dark = capture_median(black_frame(cfg), rig.capture, rig.show, settle, nmed)
+            errors = []
+            for k, t in enumerate(targets):
+                canvas = np.zeros((cam_size[1], cam_size[0], 3), np.uint8)
+                cv2.circle(canvas, (int(t[0]), int(t[1])), radius, (255, 255, 255), -1)
+                lit = capture_median(cal.to_projector(canvas).copy(), rig.capture, rig.show, settle, nmed)
+                diff = _diff_gray(lit, dark)
+                binary = _marker_binary(diff, cfg, peak=float(cv2.GaussianBlur(diff, (5, 5), 0).max()))
+                n, labels, stats, cents = cv2.connectedComponentsWithStats(binary, connectivity=8)
+                if n <= 1:
+                    print(f"REFINE: disc {k} not seen by the camera")
+                    continue
+                best = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+                obs = cents[best]
+                if stats[best, cv2.CC_STAT_AREA] > 12 * np.pi * radius * radius:
+                    print(f"REFINE: disc {k} blob too large ({int(stats[best, cv2.CC_STAT_AREA])} px): someone moved; skipping")
+                    continue
+                e = obs - t
+                errors.append(e)
+                print(f"REFINE disc {k}: intended cam {t.round(0)}, observed {obs.round(0)}, error {e.round(1)} px "
+                      f"(blob area {int(stats[best, cv2.CC_STAT_AREA])})")
+                cv2.imwrite(f"out/refine_pass{it + 1}_disc{k}.jpg", np.hstack([lit, cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)]))
+            if not errors:
+                return 2
+            e = np.mean(errors, axis=0)
+            if np.linalg.norm(e) > max_e:
+                print(f"REFINE: measured offset {np.linalg.norm(e):.0f} px exceeds refine_max_px {max_e}: NOT applied. "
+                      f"Wrong person tracked, or the disc landed off the body (see out/refine_pass*.jpg)")
+                return 2
+            spread = float(np.linalg.norm(errors[0] - errors[-1])) if len(errors) > 1 else 0.0
+            print(f"REFINE pass {it + 1}: mean error {e.round(1)} px (|e| {np.linalg.norm(e):.1f}), "
+                  f"chest-vs-belly disagreement {spread:.1f} px")
+            if np.linalg.norm(e) < float(cfg["refine_done_px"]):
+                print("REFINE: within tolerance, done")
+                break
+            T = np.array([[1, 0, -e[0]], [0, 1, -e[1]], [0, 0, 1]], np.float64)
+            cal.data.H = cal.data.H @ T
+            cal._set_data(cal.data)
+        cal.data.timestamp = cal.data.timestamp + " refined"
+        cal.save(out)
+        print(f"saved refined calibration to {out}")
+        return 0
+    finally:
+        trk.close()
+        rig.close()
+
+
 def live(config: dict, args: argparse.Namespace, out: str) -> int:
     """Interactive calibration with a real camera and projector; return an exit code."""
     disp = config["display"]
@@ -453,6 +549,9 @@ def main() -> int:
     ap.add_argument("--simulate", action="store_true", help="headless run against a fake rig")
     ap.add_argument("--preview", type=float, default=0.0, metavar="SECONDS",
                     help="aiming aid: project the dots and show the camera feed for this many seconds, then exit")
+    ap.add_argument("--refine", action="store_true",
+                    help="depth correction: project discs on the tracked person, measure the offset, shift H")
+    ap.add_argument("--refine-passes", type=int, default=3)
     ap.add_argument("--auto", action="store_true",
                     help="live mode without any keyboard/mouse: auto-detect, config gallery rect, save at once")
     ap.add_argument("--out", default=None,
@@ -465,6 +564,8 @@ def main() -> int:
     out = args.out or (config["calibration"]["sim_file"] if args.simulate else config["calibration"]["file"])
     if args.preview > 0:
         return preview(config, args, args.preview)
+    if args.refine:
+        return refine(config, args, out)
     return simulate(config, out) if args.simulate else live(config, args, out)
 
 
