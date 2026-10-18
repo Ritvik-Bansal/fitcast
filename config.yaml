@@ -83,7 +83,7 @@ tracker:
     search_window_frac: 0.4    # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
     side_width_floor_frac: 0.7 # in side view size the box/skeleton from at least this fraction of the reference shoulder width
   max_shoulder_px: 320      # wider shoulders = someone at the lens, not in the beam: ignored
-  min_shoulder_px: 35       # narrower = a projected thumbnail or reflection, not the person: ignored
+  min_shoulder_px: 50       # narrower = a projected thumbnail, reflection or wallpaper, not the person: ignored
   track_hold_frames: 6      # frames the last good track is kept when the detector blinks
   facing:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
@@ -432,6 +432,8 @@ selfcal:                    # self-service calibration (T-pose or key t): discs 
   trigger_file: out/calibrate.now   # `touch` this file to start self-calibration remotely (same as key t)
   max_torso_px: 450         # a bigger torso = someone at the laptop, not in the beam: calibration waits
   max_shoulder_px: 260
+  min_torso_px: 90          # smaller = a thumbnail or someone far outside the beam: calibration waits
+  min_shoulder_px: 55
 
 stylist:                    # optional Gemini outfit picker (needs network + a key; the demo is offline without it)
   enabled: false            # or run with --stylist

@@ -538,9 +538,12 @@ class App:
         scfg = self.cfg["selfcal"]
         person = track.person_mask if track.person_mask is not None else track.clothes_mask
         torso_px = float(_geo.torso_length(track.joints))
-        if torso_px > float(scfg.get("max_torso_px", 450)) or track.shoulder_width > float(scfg.get("max_shoulder_px", 260)):
-            log.warning("self-calibration skipped: the tracked person is at the camera, not in the beam (torso %.0f px, "
-                        "shoulders %.0f px); waiting for someone at the wall", torso_px, track.shoulder_width)
+        if (torso_px > float(scfg.get("max_torso_px", 450)) or track.shoulder_width > float(scfg.get("max_shoulder_px", 260))
+                or torso_px < float(scfg.get("min_torso_px", 90)) or track.shoulder_width < float(scfg.get("min_shoulder_px", 55))):
+            if time.perf_counter() - getattr(self, "_calib_wait_logged", 0.0) > 5.0:
+                log.warning("self-calibration waiting: tracked figure is not a person in the beam (torso %.0f px, "
+                            "shoulders %.0f px); expected torso 90-450 px", torso_px, track.shoulder_width)
+                self._calib_wait_logged = time.perf_counter()
             self._want_selfcal = True            # stays armed until a person in the beam is tracked
             return
         proj_size = (int(self.cfg["calibration"]["projector_width"]), int(self.cfg["calibration"]["projector_height"]))
