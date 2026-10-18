@@ -195,9 +195,10 @@ class MediaPipeBackend:
             from pathlib import Path
             if not Path(cfg[key]).exists():
                 raise RuntimeError(f"Model missing: {cfg[key]}. Run `.venv/bin/python scripts/download_models.py`.")
+        self.num_poses = int(cfg.get("num_poses", 3))
         self.pose = vision.PoseLandmarker.create_from_options(vision.PoseLandmarkerOptions(
             base_options=BaseOptions(model_asset_path=cfg["pose_model"]),
-            running_mode=vision.RunningMode.VIDEO, num_poses=1,
+            running_mode=vision.RunningMode.VIDEO, num_poses=self.num_poses,
             min_pose_detection_confidence=cfg["min_pose_detection_confidence"],
             min_pose_presence_confidence=cfg["min_pose_presence_confidence"],
             min_tracking_confidence=cfg["min_tracking_confidence"],
@@ -209,6 +210,7 @@ class MediaPipeBackend:
         self.has_person_mask = True
         self._rgb: np.ndarray | None = None
         self._last_ms = -1
+        self.select = None          # callable(list[(joints, vis)]) -> index, installed by the Tracker
 
     def _image(self, frame_bgr: np.ndarray):
         if self._rgb is None or self._rgb.shape != frame_bgr.shape:
@@ -225,16 +227,22 @@ class MediaPipeBackend:
         return ms
 
     def detect(self, frame_bgr: np.ndarray, ms: int) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-        """-> joints (33,3) px, visibility (33,), person mask float32 (H,W) or None. Empty arrays when no pose."""
+        """-> joints (33,3) px, visibility (33,), person mask float32 (H,W) or None for the selected person.
+        Empty arrays when no pose. With several people `self.select` (set by the Tracker) picks one."""
         h, w = frame_bgr.shape[:2]
         self._img = self._image(frame_bgr)
         r = self.pose.detect_for_video(self._img, ms)
         if not r.pose_landmarks:
             return np.zeros((33, 3), np.float32), np.zeros((33,), np.float32), None
-        lm = r.pose_landmarks[0]
-        joints = np.array([(p.x * w, p.y * h, p.z * w) for p in lm], np.float32)
-        vis = np.array([p.visibility for p in lm], np.float32)
-        pm = r.segmentation_masks[0].numpy_view() if r.segmentation_masks else None
+        cands = []
+        for lm in r.pose_landmarks:
+            cands.append((np.array([(p.x * w, p.y * h, p.z * w) for p in lm], np.float32),
+                          np.array([p.visibility for p in lm], np.float32)))
+        idx = self.select(cands) if (len(cands) > 1 and self.select is not None) else 0
+        if idx < 0:
+            return np.zeros((33, 3), np.float32), np.zeros((33,), np.float32), None
+        joints, vis = cands[idx]
+        pm = r.segmentation_masks[idx].numpy_view() if r.segmentation_masks else None
         if pm is not None and pm.ndim == 3:
             pm = pm[:, :, 0]
         return joints, vis, pm
@@ -436,6 +444,10 @@ class Tracker:
         self.last_person_mask: np.ndarray | None = None
         self.timings: dict[str, float] = {}
         self.roi: tuple[int, int, int, int] | None = None   # x0,y0,x1,y1 camera px: models only see this crop
+        self.footprint: np.ndarray | None = None             # (4,2) camera-px polygon of the projector frame
+        self._roi_off = (0, 0)
+        self._prev_center: np.ndarray | None = None
+        self.backend.select = self._select_person
         self._person_full = np.zeros((self.H, self.W), np.float32)
         self._cat_roi: np.ndarray | None = None
 
@@ -461,6 +473,30 @@ class Tracker:
         if x1 - x0 < 64 or y1 - y0 < 64:
             return (bx0, by0, bx1, by1)
         return (x0, y0, x1, y1)
+
+    def set_footprint(self, poly: np.ndarray | None) -> None:
+        """Camera-space polygon of the projector frame: only people whose torso centre lies inside are tracked."""
+        self.footprint = None if poly is None else np.asarray(poly, np.float32).reshape(-1, 2)
+
+    def _select_person(self, cands: list) -> int:
+        """Pick the person to track among several poses (coordinates are in the model crop; add the ROI offset).
+        Rule: torso centre inside the projector footprint (if known), then nearest to the previous frame's
+        person, then the widest shoulders. -1 when nobody qualifies."""
+        ox, oy = self._roi_off
+        best, best_score = -1, -1e9
+        for i, (j, v) in enumerate(cands):
+            if v[L_SHOULDER] < self.min_vis or v[R_SHOULDER] < self.min_vis:
+                continue
+            c = (j[L_SHOULDER, :2] + j[R_SHOULDER, :2] + j[L_HIP, :2] + j[R_HIP, :2]) / 4 + np.array([ox, oy], np.float32)
+            if self.footprint is not None and cv2.pointPolygonTest(self.footprint, (float(c[0]), float(c[1])), False) < 0:
+                continue
+            sw = float(np.hypot(*(j[L_SHOULDER, :2] - j[R_SHOULDER, :2])))
+            score = sw
+            if self._prev_center is not None:
+                score -= 0.5 * float(np.hypot(*(c - self._prev_center)))   # continuity
+            if score > best_score:
+                best, best_score = i, score
+        return best
 
     def set_roi(self, rect: tuple[int, int, int, int] | None, margin_frac: float = 0.0) -> None:
         """Restrict pose + segmentation to a camera-space rectangle (e.g. the projector's footprint): bystanders
@@ -492,6 +528,7 @@ class Tracker:
         t0 = time.perf_counter()
         ms = self.backend.timestamp_ms(ts)
         roi = self.roi
+        self._roi_off = (0, 0) if roi is None else (roi[0], roi[1])
         model_frame = frame_bgr if roi is None else np.ascontiguousarray(frame_bgr[roi[1]:roi[3], roi[0]:roi[2]])
         joints, vis, person = self.backend.detect(model_frame, ms)
         if roi is not None:
@@ -507,8 +544,10 @@ class Tracker:
                   np.isfinite(joints).all() and vis.max() > 0)
         if not ok:
             self._prev_area = -1.0
+            self._prev_center = None
             self.timings = {"pose_ms": (t1 - t0) * 1e3, "seg_ms": 0.0, "mask_ms": 0.0}
             return TrackResult.empty(self.H, self.W, ts)
+        self._prev_center = (joints[L_SHOULDER, :2] + joints[R_SHOULDER, :2] + joints[L_HIP, :2] + joints[R_HIP, :2]) / 4
         # zero visibility for landmarks outside the frame (knees below the frame still report 0.6+)
         inside = ((joints[:, 0] >= self.margin) & (joints[:, 0] <= self.W - self.margin) &
                   (joints[:, 1] >= self.margin) & (joints[:, 1] <= self.H - self.margin))

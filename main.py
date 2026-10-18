@@ -99,6 +99,7 @@ class App:
                                                       list(self.calib.projector_size), [0, self.calib.projector_size[1]]], float))
             self.tracker.set_roi((c[:, 0].min(), c[:, 1].min(), c[:, 0].max(), c[:, 1].max()),
                                  float(tcfg.get("roi_margin_frac", 0.1)))
+            self.tracker.set_footprint(c)
         self.gestures = GestureDetector(cfg["gestures"])
         self.sizing = SizeEstimator(cfg["sizing"], args.height)
         try:

@@ -20,6 +20,7 @@ tracker:
     min_pose_detection_confidence: 0.5
     min_pose_presence_confidence: 0.5
     min_tracking_confidence: 0.5
+    num_poses: 3            # detect up to N people; the tracker keeps the one inside the projector footprint
     seg_confidence_threshold: 0.5   # per-class confidence -> label (bilinear masks, smooth edges)
   rtmlib:
     det_model: assets/models/yolox_tiny_8xb8-300e_humanart-6f3252f9.onnx
@@ -170,6 +171,8 @@ calibration:
   refine_wait_s: 20         # --refine: wait this long for a tracked person before giving up
   refine_max_px: 150        # --refine: offsets above this are rejected (wrong person / disc off the body)
   refine_depth_change_frac: 0.08   # --refine: torso length differing from the reference spot by more than this = second depth point
+  refine_still_px: 3        # --refine: torso centre must move less than this per frame for 10 frames before probing
+  refine_max_disagreement_px: 30   # --refine: chest and belly probes must agree within this, else the pass is discarded
 
 sizing:
   height_cm: 175            # operator enters this; --height overrides

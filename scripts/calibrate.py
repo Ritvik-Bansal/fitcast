@@ -433,6 +433,7 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
     pw, ph = cal.projector_size
     c = cal.unproject_points(np.array([[0, 0], [pw, 0], [pw, ph], [0, ph]], float))
     trk.set_roi((c[:, 0].min(), c[:, 1].min(), c[:, 0].max(), c[:, 1].max()), float(tcfg.get("roi_margin_frac", 0.1)))
+    trk.set_footprint(c)
     import shutil
     shutil.copy(out, out + ".bak")
     print(f"backup of the current calibration: {out}.bak")
@@ -456,6 +457,24 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
             if track is None or not track.ok or ok_streak < 10:
                 cv2.imwrite("out/refine_noperson.jpg", f)
                 print("REFINE: no person tracked within the wait time (see out/refine_noperson.jpg)")
+                return 2
+            # wait until the person is still: torso centre moves < still_px over 10 consecutive frames
+            still, t_still, prev_c = 0, time.time(), None
+            while time.time() - t_still < float(cfg["refine_wait_s"]):
+                f = rig.capture()
+                track = trk.process(f, time.perf_counter())
+                if not track.ok:
+                    still, prev_c = 0, None
+                    continue
+                jj = track.joints
+                c = (jj[L_SHOULDER, :2] + jj[R_SHOULDER, :2] + jj[L_HIP, :2] + jj[R_HIP, :2]) / 4
+                still = still + 1 if (prev_c is not None and float(np.hypot(*(c - prev_c))) < float(cfg["refine_still_px"])) else 0
+                prev_c = c
+                rig.status(f"REFINE pass {it + 1}: hold still ({still}/10)", "q quit")
+                if still >= 10:
+                    break
+            if still < 10:
+                print("REFINE: person kept moving; aborting this pass")
                 return 2
             j = track.joints
             sc = (j[L_SHOULDER, :2] + j[R_SHOULDER, :2]) / 2
@@ -482,17 +501,25 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
                     continue
                 best = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
                 obs = cents[best]
-                if stats[best, cv2.CC_STAT_AREA] > 12 * np.pi * radius * radius:
-                    print(f"REFINE: disc {k} blob too large ({int(stats[best, cv2.CC_STAT_AREA])} px): someone moved; skipping")
+                expected_area = np.pi * radius * radius
+                a = float(stats[best, cv2.CC_STAT_AREA])
+                if not (0.3 * expected_area <= a <= 3.0 * expected_area):
+                    print(f"REFINE: disc {k} blob area {int(a)} px not plausible for a {radius} px disc ({int(expected_area)} px): skipping")
                     continue
                 e = obs - t
                 errors.append(e)
                 print(f"REFINE disc {k}: intended cam {t.round(0)}, observed {obs.round(0)}, error {e.round(1)} px "
                       f"(blob area {int(stats[best, cv2.CC_STAT_AREA])})")
                 cv2.imwrite(f"out/refine_pass{it + 1}_disc{k}.jpg", np.hstack([lit, cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)]))
-            if not errors:
-                return 2
+            if len(errors) < len(targets):
+                print("REFINE: not every probe was seen cleanly; pass discarded (nothing applied)")
+                continue
             e = np.mean(errors, axis=0)
+            spread_chk = float(np.linalg.norm(errors[0] - errors[-1]))
+            if spread_chk > float(cfg["refine_max_disagreement_px"]):
+                print(f"REFINE: chest/belly probes disagree by {spread_chk:.0f} px (> {cfg['refine_max_disagreement_px']}): "
+                      f"person moved or a probe missed the body; pass discarded")
+                continue
             if np.linalg.norm(e) > max_e:
                 print(f"REFINE: measured offset {np.linalg.norm(e):.0f} px exceeds refine_max_px {max_e}: NOT applied. "
                       f"Wrong person tracked, or the disc landed off the body (see out/refine_pass*.jpg)")
