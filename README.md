@@ -52,6 +52,21 @@ onnxruntime 1.31.0 (CoreML EP present), rtmlib 0.0.16, Python 3.11.15.
 
 ## 3. Calibration
 
+Short version (what worked on the real rig):
+
+```bash
+.venv/bin/python scripts/calibrate.py --preview 40          # aim: all 9 dots inside the camera view, nobody in frame
+.venv/bin/python scripts/calibrate.py --auto                # markers one at a time, no clicks; prints reprojection + VERIFY
+.venv/bin/python scripts/calibrate.py --refine              # person stands on the mark: probe discs measure the depth offset
+.venv/bin/python main.py --demo
+```
+
+Rules: camera as close to the projector lens as possible, pointing the same way; nothing may move after
+`--auto`; `--refine` must be redone whenever the standing mark or the camera moves. Keys `[` / `]` nudge all
+garments up/down live if the collar sits wrong for a particular person.
+
+### Full walkthrough
+
 ```bash
 .venv/bin/python scripts/calibrate.py --source 0            # live
 .venv/bin/python scripts/calibrate.py --simulate            # no hardware: synthetic rig -> calibration_sim.yaml, must print VERIFY PASS
@@ -139,7 +154,9 @@ loss fades to black and back in.
 | Garment sits beside the body | calibration: re-run `calibrate.py`; check camera resolution matches `calibration.yaml` (it is rescaled, but a moved camera is not); camera must not move after calibration |
 | Lag / garment trails the body | check FPS in the debug window; raise `tracker.seg_every_n_frames`; raise `smoothing.predict_ms` (50-80), lower `min_cutoff` only if jitter is fine |
 | Jitter | lower `smoothing.min_cutoff` (0.5), lower `beta` |
-| Wrong camera | `--list-cameras`, then `--source N`; Continuity Camera often takes index 0 and the built-in camera moves to 1 |
+| Wrong camera | `capture.source` accepts `name:MacBook` / `name:iPhone` (AVFoundation device name) or `auto`; numeric indices shuffle when the iPhone comes and goes |
+| Garment sits low / high on everyone | re-run `calibrate.py --refine` on the mark; then `[` / `]` live nudge; make sure the camera has not moved |
+| Garment too big / flickers between shapes | the mask fell back to skeleton polygons: check `(fallback)` in the debug text; raise `mask.area_jump_fallback` or `area_jump_frames` |
 | Window on the wrong display | `--projector-x 1512 --projector-y 0` (origin of the second display in points), `f` toggles fullscreen |
 | Washed-out colors | dim the lights over the beam, raise `compositor.brightness` up to 1.0 and `garments.saturation_boost`, regenerate garments; avoid pastel/black garments |
 | Light on the face | should be impossible: `compositor.compose` blacks out `head_box` last. If the box looks small, raise `tracker.head.top_margin_frac` / `side_margin_frac` |

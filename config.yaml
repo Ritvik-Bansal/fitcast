@@ -131,6 +131,8 @@ gestures:
   window_s: 0.4
   min_travel_sw: 1.2        # horizontal travel in shoulder widths within the window
   min_velocity_sw_per_s: 2.5
+  max_velocity_sw_per_s: 12   # faster than this is a landmark jump (turns, identity switches), not a swipe
+  max_travel_sw: 2.6
   cooldown_s: 1.0
   band_top_frac: 0.0        # wrist must stay between head (top) ...
   band_bottom_frac: 1.0     # ... and hips (bottom); fractions along head->hip span

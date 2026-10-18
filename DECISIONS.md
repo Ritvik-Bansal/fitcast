@@ -35,3 +35,7 @@
 - Demo idle timer resets on operator input (keys, swipes) only; `set_outfit` itself must not reset it or the auto-cycle waits `idle_s` between every change.
 - Hips keep their visibility when they fall outside the frame (person close to the camera): the torso quad is anchored on the predicted hips and clipped by the frame; legs/arms still need in-frame landmarks. Sizing additionally requires the torso inside the frame.
 - Live test with the MacBook camera (2026-10-17 17:07): 27 fps with debug+recording, 6 real swipes detected, tracking survives bystanders; the iPhone nearby takes camera index 0 and streams black when locked.
+- Live: the camera must sit at the projector lens; the Mac lid camera beside the projector produced a 98 px (~10 cm) drop at the standing spot, fixed by `calibrate.py --refine` (probe discs on the tracked body). Any camera move invalidates both calibration steps.
+- Live: tracking is restricted to the projector footprint (ROI from H) because bystanders near the lens hijacked the pose model and one refine run.
+- Live: `cv2.waitKey`/`CATransaction.flush` block ~10-12 ms per call on the main thread; the projector frame is committed from a worker thread and the event pump runs every 2nd frame.
+- Live: head box bottom is anchored to the chin (lowest face landmark + 0.30 SW) instead of the shoulder line; the neck/collar region is not the face and leaving it dark made every shirt look like it started too low.

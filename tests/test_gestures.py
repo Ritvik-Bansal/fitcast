@@ -195,3 +195,19 @@ def test_reset_clears_cooldown() -> None:
     rig.det.reset()
     swipe(rig, RIGHT_X, LEFT_X)
     assert rig.names() == ["prev", "next"]
+
+
+def test_landmark_jump_is_not_a_swipe(config):
+    """A wrist that teleports 3.5 shoulder widths in two frames is a tracking glitch, not a gesture."""
+    from fitcast.gestures import GestureDetector
+    from tests.conftest import make_track
+    det = GestureDetector(config["gestures"])
+    t = 0.0
+    for i in range(6):
+        tr = make_track(ts=t); tr.joints[15, 0] = 740 + 30; tr.joints[15, 1] = 350
+        assert det.update(tr) == []
+        t += 1 / 30
+    for i in range(3):
+        tr = make_track(ts=t); tr.joints[15, 0] = 740 + 30 - 700; tr.joints[15, 1] = 350   # 3.5 sw jump
+        assert det.update(tr) == []
+        t += 1 / 30

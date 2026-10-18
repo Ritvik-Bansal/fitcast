@@ -41,6 +41,8 @@ class GestureDetector:
         self.log_events = bool(cfg["log_events"])
         self.min_vis = float(cfg.get("min_wrist_visibility", _DEFAULT_MIN_WRIST_VISIBILITY))
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
+        self.max_velocity = float(cfg.get("max_velocity_sw_per_s", 12.0))
+        self.max_travel = float(cfg.get("max_travel_sw", 2.6))
         # Per wrist: (landmark index, label, ring buffer of (timestamp, nx, ny)).
         # The head-to-hip band is checked when a sample arrives; an out-of-band
         # sample clears the buffer, so every buffered window is entirely in band.
@@ -99,6 +101,9 @@ class GestureDetector:
                 continue
             velocity = abs(dx) / dt
             if velocity <= self.min_velocity:
+                continue
+            if velocity > self.max_velocity or abs(dx) > self.max_travel:
+                buf.clear()                 # faster/farther than an arm can move: a landmark jump, not a swipe
                 continue
             event = self._direction(dx)
             self._cooldown_until = now + self.cooldown_s
