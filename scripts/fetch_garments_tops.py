@@ -76,12 +76,13 @@ TOPS: dict[str, dict] = {
         title="ballcap hat Lakers jersey basketball pink roses poms game tickets shoes alstroemeria lilies",
         license="CC BY 2.0", license_url="https://creativecommons.org/licenses/by/2.0/", author="ProFlowers.com",
         crop=(0.215, 0.355, 0.795, 0.965), white=246, bg_dist=0, smooth=True, print_dist=45,
+        print_box=(0.15, 0.08, 0.85, 0.66),
         desc="white Los Angeles Lakers #24 (Kobe Bryant) adidas swingman jersey, purple/gold trim (flat-lay; "
              "cropped out of a styled flat-lay with cap, shoes, ball and flowers)"),
     "tee_welders": dict(
         title='File:Pink "Welders" T-Shirt Worn by the Welders - DPLA - b0a00013064a4280e484f55149cb7174 (page 1).jpg',
         back_title='File:Pink "Welders" T-Shirt Worn by the Welders - DPLA - b0a00013064a4280e484f55149cb7174 (page 4).jpg',
-        attribution=MOHIST, print_dist=40,
+        attribution=MOHIST, bg_dist=45,
         desc='hot-pink "the Welders" band tee (St. Louis punk band), front + back photo'),
     "tee_coral_court": dict(
         title="File:Coral Court Motel T-Shirt - DPLA - cd249cf4a00e22c6e6821cb73633bb23 (page 4).jpg",
@@ -96,14 +97,18 @@ TOPS: dict[str, dict] = {
         author="Smithsonian National Museum of African American History and Culture (maker: P. Goldsmith & Sons)",
         bg_dist=45, print_dist=40,
         desc='royal-blue mesh "WAYNE 14" vintage basketball shirt with gold striped shoulders, front + back photo'),
-    "hoodie_celine": dict(
-        title="File:Celine Hoodie.jpg", crop=(0.0, 0.07, 0.80, 1.0), bg_dist=12, print_dist=40,
-        desc="beige pullover hoodie with brown horse-and-carriage logo print"),
+    "sweatshirt_lenders": dict(
+        title="File:Lender's Sweatshirt (15844939901).jpg", print_dist=40,
+        desc="red fleece crewneck sweatshirt with white Lender's Bagels logo (sleeves folded across the front)"),
     "flannel_buffalo": dict(
         title="File:Polo Ralph Lauren winter jacket, red and black plaid.jpg", attribution=SHEIE, open_frac=0.012,
+        erase=[[(0.413, 0.0), (0.562, 0.0), (0.556, 0.084), (0.548, 0.147), (0.531, 0.191), (0.500, 0.242),
+                (0.482, 0.231), (0.447, 0.182), (0.420, 0.142), (0.411, 0.084)]],
         desc="red and black buffalo-check flannel shirt jacket"),
     "jacket_denim": dict(
         title="File:Polo Ralph Lauren denim jacket.jpg", attribution=SHEIE, open_frac=0.012,
+        erase=[[(0.447, 0.067), (0.580, 0.067), (0.582, 0.129), (0.562, 0.147), (0.547, 0.187), (0.533, 0.233),
+                (0.509, 0.209), (0.487, 0.182), (0.469, 0.164), (0.453, 0.124)]],
         desc="mid-blue denim trucker jacket with corduroy collar"),
     "polo_freddies": dict(
         title="File:Freddie's Polo Shirt - DPLA - 74c5a614754328992dc0c7ecf5102d2c (page 4).jpg",
@@ -118,7 +123,7 @@ PAIRS: list[tuple[str, str, str, str, str]] = [
     ("25_band_tee_flares", "Welders Band Tee + Flared Jeans", "short", "tee_welders", "14_oversized_tee_flares"),
     ("26_motel_tee_cargo", "Coral Court Motel Tee + Cargo Pants", "short", "tee_coral_court", "17_olive_overshirt_cargo"),
     ("27_wayne_tee_trackpants", "Wayne 14 Athletic Tee + Track Pants", "short", "tee_wayne", "15_green_tee_trackpants"),
-    ("28_hoodie_sweatpants", "Beige Logo Hoodie + Sweatpants", "long", "hoodie_celine", "19_hoodie_sweatpants"),
+    ("28_crewneck_sweatpants", "Red Logo Crewneck + Sweatpants", "long", "sweatshirt_lenders", "19_hoodie_sweatpants"),
     ("29_flannel_grey_jeans", "Buffalo Plaid Flannel + Grey Jeans", "long", "flannel_buffalo", "16_madras_grey_jeans"),
     ("30_denim_jacket_khakis", "Denim Jacket + Khaki Trousers", "long", "jacket_denim", "18_sweater_khakis"),
     ("31_polo_chinos", "Orange Polo + Chinos", "short", "polo_freddies", "22_scout_overshirt_chinos"),

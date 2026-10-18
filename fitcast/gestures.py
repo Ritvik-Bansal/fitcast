@@ -52,6 +52,8 @@ class GestureDetector:
         self._facing_warned = 0.0
         self.max_body_travel = float(cfg.get("max_body_travel_sw", 0.5))
         self.vertical_swipes = bool(cfg.get("vertical_swipes", False))
+        self.window_v = float(cfg.get("window_s_vertical", cfg.get("window_s", 0.4)))
+        self._miss_logged = 0.0
         self.hand_for_bottoms = str(cfg.get("hand_for_bottoms", "right"))
         self.min_travel_v = float(cfg.get("min_travel_sw_vertical", 0.9))
         self.min_velocity_v = float(cfg.get("min_velocity_sw_per_s_vertical", 1.8))
@@ -120,23 +122,34 @@ class GestureDetector:
                 b.clear()
             return []
 
+        window = self.window_v if self.vertical_swipes else self.window_s
         for idx, side, buf in self._wrists:
             wx, wy = float(j[idx, 0]), float(j[idx, 1])
-            if vis[idx] < self.min_vis or not band_top <= wy <= band_bottom:
+            in_band = self.vertical_swipes or band_top <= wy <= band_bottom   # vertical: anywhere in the frame
+            if vis[idx] < self.min_vis or not in_band:
                 buf.clear()
                 continue
             buf.append((now, (wx - cx) / sw, (wy - cy) / sw))
-            while buf[0][0] < now - self.window_s:
+            while buf[0][0] < now - window:
                 buf.popleft()
             t0, nx0, ny0 = buf[0]
             dt = now - t0
             dx = buf[-1][1] - nx0
             if self.vertical_swipes:
-                dy = buf[-1][2] - ny0
+                # travel = extreme-to-extreme within the window, so a raise that already peaked still counts
+                ys = [b[2] for b in buf]
+                i_min, i_max = int(np.argmin(ys)), int(np.argmax(ys))
+                dy = ys[-1] - ys[0]
+                span = ys[i_max] - ys[i_min]
+                if abs(dy) < 0.5 * span:          # the hand went up and came back: use the dominant direction
+                    dy = span if i_max > i_min else -span
                 if len(buf) < self.min_samples or dt <= 0.0 or abs(dy) <= self.min_travel_v:
                     continue
                 vel = abs(dy) / dt
                 if vel <= self.min_velocity_v:
+                    if self.log_events and now - self._miss_logged > 1.0:
+                        log.info("vertical swipe too slow: wrist=%s travel=%.2fsw in %.2fs", side, dy, dt)
+                        self._miss_logged = now
                     continue
                 if vel > self.max_velocity or abs(dy) > self.max_travel:
                     buf.clear()

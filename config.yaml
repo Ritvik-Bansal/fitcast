@@ -146,7 +146,7 @@ compositor:
   head_fill_level: 0        # flat grey on the head box (0 = black, user preference). Hard cap 110 (43%): never garment pixels
   gallery:
     enabled: true
-    hide_tops: ["Heather Hoodie", "Basketball Jersey"]        # drawn parts inside otherwise real outfits
+    hide_tops: ["Heather Hoodie", "Basketball Jersey", "Crewneck Sweater"]   # drawn parts, and the sweater photo with folded sleeves
     hide_bottoms: ["Cargo Pants", "Chinos", "Sweatpants"]
     rect: [20, 40, 300, 700]   # x0 y0 x1 y1, camera px; set during calibration so it lands on the wall
     thumbs_visible: 5
@@ -169,8 +169,9 @@ gestures:
   band_bottom_frac: 1.7     # ... and mid-thigh (bottom); fractions along head->hip span
   vertical_swipes: true     # per-hand vertical swipes: right hand up/down scrolls bottoms, left hand scrolls tops
   hand_for_bottoms: right   # the person's right hand
-  min_travel_sw_vertical: 0.9
-  min_velocity_sw_per_s_vertical: 1.8
+  window_s_vertical: 0.8    # an arm raise is slower than a flick: look at the last 0.8 s
+  min_travel_sw_vertical: 0.7
+  min_velocity_sw_per_s_vertical: 1.0
   zone_swipes: true         # fallback scheme when vertical_swipes is false: horizontal swipe above/below the waist
   zone_line_sw: -0.3        # zone split, shoulder widths above the hip line: chest/head = tops, waist/legs = bottoms
   min_travel_sw_zone: 0.9           # with zone swipes both zones accept subtler swipes ...
