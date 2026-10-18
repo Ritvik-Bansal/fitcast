@@ -62,8 +62,9 @@ def test_two_plane_model_interpolates(config):
     assert abs(Hm[0, 2] - (H0[0, 2] + 50.0)) < 1e-6 and abs(Hm[1, 2] - (H0[1, 2] + 25.0)) < 1e-6
     assert np.allclose(cal.H_for(None), H0)
     img = np.zeros((720, 1280, 3), np.uint8); img[300:310, 600:610] = 255
-    p0 = cal.to_projector(img, torso_px=100.0).copy(); p1 = cal.to_projector(img, torso_px=150.0).copy()
-    ya, xa = np.nonzero(p0[:, :, 0]); yb, xb = np.nonzero(p1[:, :, 0])
-    assert abs((xb.mean() - xa.mean()) - 100.0) < 2 and abs((yb.mean() - ya.mean()) - 50.0) < 2
+    p1 = cal.to_projector(img, torso_px=150.0).copy()
+    ref = cv2.warpPerspective(img, H1, (1920, 1080))
+    ya, xa = np.nonzero(ref[:, :, 0]); yb, xb = np.nonzero(p1[:, :, 0])
+    assert abs(xb.mean() - xa.mean()) < 1.5 and abs(yb.mean() - ya.mean()) < 1.5   # second plane -> warp with H1
     assert cal.set_plane(H0, 105.0) == "primary"          # same distance -> replaces the primary (reference 105 now)
     assert cal.data.depth_ref_torso_px == 105.0 and cal.data.H2 is not None
