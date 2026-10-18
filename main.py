@@ -170,6 +170,9 @@ class App:
         self.reopen_s = float(cfg["capture"]["reopen_s"])
         self.pump_every = max(1, int(cfg["display"].get("pump_every_n", 1)))
         self._torso_ema: float | None = None
+        self._proj_person: np.ndarray | None = None
+        if self.sensor_kind != "iphone":
+            self.compositor.use_separate_gallery_layer(True)
         self.depth_shift = (0.0, 0.0)
         self._depth_render: np.ndarray | None = None
         self._want_selfcal = False
@@ -580,6 +583,15 @@ class App:
             if track.ok and track.visibility[23] >= self.tracker.min_vis and track.visibility[24] >= self.tracker.min_vis:
                 split_y = float(0.5 * (track.joints[23, 1] + track.joints[24, 1]))
             proj = self.calib.to_projector(comp, shift, torso_px=self._torso_ema, split_y=split_y)
+            gl = self.compositor.gallery_layer
+            if gl is not None and self.calib.ok:
+                # gallery on the wall: calibration-time plane, no depth shift; combined by max (disjoint regions)
+                if self._proj_person is None or self._proj_person.shape != proj.shape:
+                    self._proj_person = np.zeros_like(proj)
+                np.copyto(self._proj_person, proj)
+                pg = self.calib.to_projector(gl)
+                cv2.max(self._proj_person, pg, dst=self._proj_person)
+                proj = self._proj_person
         t2 = time.perf_counter()
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)

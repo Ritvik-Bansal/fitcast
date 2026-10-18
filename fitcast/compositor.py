@@ -18,6 +18,7 @@ class Compositor:
     def __init__(self, cfg: dict, size: tuple[int, int]) -> None:
         self.cfg = cfg
         self.W, self.H = size
+        self.gallery_layer: np.ndarray | None = None
         self.out = np.zeros((self.H, self.W, 3), np.uint8)
         self._lit = np.zeros((self.H, self.W), np.uint8)
         self._lit3 = np.zeros((self.H, self.W, 3), np.uint8)
@@ -47,6 +48,10 @@ class Compositor:
     def set_brightness_gamma(self, brightness: float, gamma: float) -> None:
         self._lut = self._make_lut(brightness, gamma)
 
+    def use_separate_gallery_layer(self, enabled: bool = True) -> None:
+        """Draw the gallery into `self.gallery_layer` (camera space BGR) instead of the lit frame."""
+        self.gallery_layer = np.zeros((self.H, self.W, 3), np.uint8) if enabled else None
+
     def set_gallery_rect(self, rect: list[int] | tuple[int, int, int, int]) -> None:
         self.rect = [int(x) for x in rect]
 
@@ -68,6 +73,8 @@ class Compositor:
         self._fade = min(1.0, self._fade + step) if track.ok else max(0.0, self._fade - step)
 
         out = self.out
+        if self.gallery_layer is not None:
+            self.gallery_layer.fill(0)
         if not track.ok:
             # tracking lost: fade the last good frame to black (it already has its head box blacked out)
             if self._fade > 0.0:
@@ -84,12 +91,16 @@ class Compositor:
         cv2.LUT(out, self._lut, dst=out)
 
         if self.gallery_enabled and gallery.visible and gallery.outfits:
-            self._draw_gallery(out, gallery, track, now)
+            # the gallery lives on the wall: with `gallery_layer` set it is returned separately so the caller can warp
+            # it with the wall-distance mapping while the garments use the person's distance
+            self._draw_gallery(out if self.gallery_layer is None else self.gallery_layer, gallery, track, now)
 
-        # SAFETY: head blackout is always the last operation on the lit frame.
+        # SAFETY: head blackout is always the last operation on the lit frame (and on the gallery layer).
         x0, y0, x1, y1 = track.head_box
         if x1 > x0 and y1 > y0:
             out[y0:y1, x0:x1] = 0
+            if self.gallery_layer is not None:
+                self.gallery_layer[y0:y1, x0:x1] = 0
         np.copyto(self._held, out)
         if self._fade < 1.0:
             cv2.convertScaleAbs(out, dst=out, alpha=self._fade, beta=0)

@@ -64,7 +64,8 @@ class Renderer:
             return
         c = self.cfg
         min_w = c["side_min_width_frac"] * ref if facing == "side" else 0.0
-        dst = geo.torso_quad(j, sw, c["torso_margin_frac"], c["neck_raise_frac"], c["hem_drop_frac"], min_w)
+        raise_frac = float(c.get("neck_raise_back_frac", c["neck_raise_frac"])) if from_behind else c["neck_raise_frac"]
+        dst = geo.torso_quad(j, sw, c["torso_margin_frac"], raise_frac, c["hem_drop_frac"], min_w)
         # dst is [image-left shoulder, image-right shoulder, image-right hem, image-left hem] which matches
         # the texture's [TL, TR, BR, BL] for BOTH a front image seen from the front and a back image seen
         # from behind (viewer-left is always image-left), so no winding swap is needed.

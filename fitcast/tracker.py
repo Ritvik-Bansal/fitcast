@@ -131,6 +131,14 @@ def draw_skeleton_mask(out: np.ndarray, joints: np.ndarray, vis: np.ndarray, sw:
         quad = geo.torso_quad(joints, sw, cfg["torso_margin_frac"], cfg["neck_raise_frac"], cfg["hem_drop_frac"],
                               min_width=cfg["min_torso_width_frac"] * sw)
         cv2.fillConvexPoly(out, np.round(quad).astype(np.int32), 255)
+        # neck strip: the collar area above the shoulder line, neck-wide only (a full-width raise paints the wall
+        # beside the head when the shoulders are drawn high)
+        nw, nr = float(cfg.get("neck_strip_width_frac", 0.0)), float(cfg.get("neck_strip_raise_frac", 0.0))
+        if nw > 0 and nr > 0:
+            mid = 0.5 * (joints[L_SHOULDER, :2] + joints[R_SHOULDER, :2])
+            x0, x1 = int(mid[0] - 0.5 * nw * sw), int(mid[0] + 0.5 * nw * sw)
+            y0, y1 = int(mid[1] - nr * sw), int(mid[1] + 0.1 * sw)
+            cv2.rectangle(out, (x0, y0), (x1, y1), 255, -1)
     widths = {"upper": cfg["upper_arm_width_frac"], "fore": cfg["forearm_width_frac"],
               "thigh": cfg["thigh_width_frac"], "shin": cfg["shin_width_frac"]}
     for a, b, kind in LIMBS:
@@ -638,6 +646,9 @@ class Tracker:
             # whatever we project onto it (projected light never changes a person into background or skin)
             np.not_equal(self._cat, self.bg_class, out=self._clothes.view(bool))
             self._clothes *= 255
+            if person is not None:          # second opinion: the pose model's person mask (independent failure modes)
+                np.copyto(self._tmp2, self._pf, casting="unsafe")
+                cv2.bitwise_or(self._clothes, self._tmp2, dst=self._clothes)
             # skin counts only where bare skin is expected: forearms + hands and above the shoulder line (neck).
             # The segmenter calls white short sleeves "skin" too often to trust it on the upper arms.
             self._zone.fill(0)

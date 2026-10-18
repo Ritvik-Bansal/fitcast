@@ -48,7 +48,7 @@ tracker:
     close_kernel_px: 5
     erode_px: 6
     temporal_alpha: 0.45    # EMA weight of the newest mask (1.0 = no smoothing)
-    mask_hold_frames: 6        # clothes pixels persist this many frames after a segmenter dropout (clipped to the capsule region)
+    mask_hold_frames: 10       # clothes pixels persist this many frames after a segmenter dropout (clipped to the capsule region)
     sil_margin_sw: 0.5         # silhouette mode: fabric may extend this many shoulder widths beyond the skeleton capsules
     forearm_skin_zone_frac: 0.6 # width (shoulder widths) of the forearm/hand zone where segmenter skin is trusted
     area_jump_fallback: 0.40   # fall back to skeleton when clothes area changes more than this fraction ...
@@ -61,12 +61,14 @@ tracker:
     torso_fill_hem_frac: 0.5   # fill polygon hem drop as a fraction of skeleton.hem_drop_frac
     skeleton:               # widths as fractions of shoulder width
       torso_margin_frac: 0.15
-      neck_raise_frac: 0.30   # torso core reaches the neck base (white tee on a white wall: the segmenter cannot)
+      neck_raise_frac: 0.05
+      neck_strip_width_frac: 0.5   # collar strip above the shoulder line, this many shoulder widths wide ...
+      neck_strip_raise_frac: 0.25  # ... and this high (white tee on a white wall: the segmenter cannot see it)
       hem_drop_frac: 0.15
       upper_arm_width_frac: 0.32
       forearm_width_frac: 0.26
-      thigh_width_frac: 0.50
-      shin_width_frac: 0.40
+      thigh_width_frac: 0.62
+      shin_width_frac: 0.52
       min_torso_width_frac: 0.7   # side view: torso polygon is at least this wide (fraction of shoulder width)
       dilate_px: 16         # extra dilation when used as a gate in intersect mode
   head:
@@ -98,14 +100,15 @@ smoothing:
 
 renderer:
   torso_margin_frac: 0.12   # expand torso quad outward, fraction of shoulder width
-  neck_raise_frac: 0.25     # raise the top edge to the neck base (the mask clips what is not fabric)
+  neck_raise_frac: 0.12     # raise the top edge towards the neck base (the mask clips what is not fabric)
+  neck_raise_back_frac: 0.40 # back view: shoulder landmarks sit low from behind, lift the back texture to the neck
   hem_drop_frac: 0.05       # extend the bottom edge below the hips (a tee hem sits at the hip joints)
   upper_arm_width_frac: 0.30
   forearm_width_frac: 0.24
   sleeve_overlap_frac: 0.08
   short_sleeve_frac: 0.65   # short sleeves end at this fraction of shoulder->elbow
-  leg_width_frac: 0.42
-  shin_width_frac: 0.34
+  leg_width_frac: 0.80      # wide: baggy legs; the clothes mask clips the texture to the real pants
+  shin_width_frac: 0.70
   waist_band_height_frac: 0.14
   side_min_width_frac: 0.85 # side view: torso quad is at least this wide (fraction of ref shoulder width); the mask clips it
   bottom_knee_frac: 0.55    # where the bottoms texture splits thigh / shin (fraction of its height)
