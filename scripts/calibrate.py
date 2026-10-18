@@ -481,7 +481,28 @@ def refine(config: dict, args: argparse.Namespace, out: str) -> int:
             hc = (j[L_HIP, :2] + j[R_HIP, :2]) / 2
             torso_px = geo.torso_length(j)
             ref_t = cal.data.depth_ref_torso_px
-            new_depth = ref_t is not None and abs(torso_px - ref_t) / ref_t > float(cfg["refine_depth_change_frac"])
+            frac = float(cfg["refine_depth_change_frac"])
+            if args.depth_point:
+                if ref_t is None:
+                    print("REFINE: no reference spot yet; run --refine (without --depth-point) on the mark first")
+                    return 2
+                # wait until the person really stands at a different distance
+                t_wait = time.time()
+                while abs(torso_px - ref_t) / ref_t <= frac and time.time() - t_wait < float(cfg["refine_wait_s"]) * 2:
+                    f = rig.capture()
+                    track = trk.process(f, time.perf_counter())
+                    if track.ok:
+                        j = track.joints
+                        torso_px = geo.torso_length(j)
+                    rig.status(f"DEPTH POINT: walk ~1 m closer or farther (torso {torso_px:.0f} px, reference {ref_t:.0f} px)", "q quit")
+                    if rig.take_key() == ord("q"):
+                        return 1
+                if abs(torso_px - ref_t) / ref_t <= frac:
+                    print(f"REFINE: still at the reference distance (torso {torso_px:.0f} vs {ref_t:.0f} px); nothing measured")
+                    return 2
+                sc = (j[L_SHOULDER, :2] + j[R_SHOULDER, :2]) / 2
+                hc = (j[L_HIP, :2] + j[R_HIP, :2]) / 2
+            new_depth = ref_t is not None and abs(torso_px - ref_t) / ref_t > frac
             if it == 0:
                 print(f"REFINE: torso length {torso_px:.0f} px" + (f" (reference spot {ref_t:.0f} px)" if ref_t else "")
                       + ("  -> DIFFERENT distance: measuring the depth slope" if new_depth else "  -> reference spot"))
@@ -602,6 +623,8 @@ def main() -> int:
     ap.add_argument("--refine", action="store_true",
                     help="depth correction: project discs on the tracked person, measure the offset, shift H")
     ap.add_argument("--refine-passes", type=int, default=3)
+    ap.add_argument("--depth-point", action="store_true",
+                    help="with --refine: measure the parallax slope at a second standing distance (waits until you moved)")
     ap.add_argument("--auto", action="store_true",
                     help="live mode without any keyboard/mouse: auto-detect, config gallery rect, save at once")
     ap.add_argument("--out", default=None,
