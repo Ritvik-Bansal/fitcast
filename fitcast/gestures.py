@@ -46,9 +46,10 @@ class GestureDetector:
         self.log_events = bool(cfg["log_events"])
         self.min_vis = float(cfg.get("min_wrist_visibility", _DEFAULT_MIN_WRIST_VISIBILITY))
         self.zone_swipes = bool(cfg.get("zone_swipes", False))
-        self.zone_line = float(cfg.get("zone_line_sw", -0.2))
-        self.min_travel_bottom = float(cfg.get("min_travel_sw_bottom", 0.7))
-        self.min_velocity_bottom = float(cfg.get("min_velocity_sw_per_s_bottom", 1.5))
+        self.zone_line = float(cfg.get("zone_line_sw", -0.3))            # relative to the hip line (negative = above)
+        self.min_travel_zone = float(cfg.get("min_travel_sw_zone", 0.8))
+        self.min_velocity_zone = float(cfg.get("min_velocity_sw_per_s_zone", 1.8))
+        self._facing_warned = 0.0
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
         self.max_velocity = float(cfg.get("max_velocity_sw_per_s", 12.0))
         self.max_travel = float(cfg.get("max_travel_sw", 2.6))
@@ -76,6 +77,9 @@ class GestureDetector:
         """
         now = track.timestamp
         if not track.ok or track.facing != "front":
+            if track.ok and self.log_events and now - self._facing_warned > 2.0:
+                log.info("swipes ignored: facing=%s (ratio %.2f)", track.facing, track.facing_ratio)
+                self._facing_warned = now
             self._clear()
             return []
         if now < self._cooldown_until:
@@ -93,6 +97,7 @@ class GestureDetector:
         span = (float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - nose_y
         band_top = nose_y + self.band_top_frac * span
         band_bottom = nose_y + self.band_bottom_frac * span
+        hip_ny = ((float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - cy) / sw   # hip line, shoulder-width units
 
         if self._raise_hands(now, j, vis, nose_y):
             return ["toggle_gallery"]
@@ -113,9 +118,9 @@ class GestureDetector:
             # zone first: swipes high up (above `zone_line_sw`, shoulder-width units from the shoulder centre,
             # negative = above) are for tops; everything lower is for bottoms, which may be subtler
             mean_ny = sum(b[2] for b in buf) / len(buf)
-            zone = "top" if mean_ny < self.zone_line else "bottom"
-            travel_min = self.min_travel if (zone == "top" or not self.zone_swipes) else self.min_travel_bottom
-            vel_min = self.min_velocity if (zone == "top" or not self.zone_swipes) else self.min_velocity_bottom
+            zone = "top" if mean_ny < hip_ny + self.zone_line else "bottom"
+            travel_min = self.min_travel if not self.zone_swipes else self.min_travel_zone
+            vel_min = self.min_velocity if not self.zone_swipes else self.min_velocity_zone
             if len(buf) < self.min_samples or dt <= 0.0 or abs(dx) <= travel_min:
                 continue
             velocity = abs(dx) / dt

@@ -17,7 +17,7 @@ FPS = 30.0
 CHEST_Y = 300.0          # between nose (120) and hips (500)
 LEFT_X, RIGHT_X = 500.0, 800.0   # 300 px = 1.5 shoulder widths
 IDLE_LW = (780.0, 450.0)          # resting left wrist, in band, never moves
-ABOVE_HEAD_Y = 80.0
+ABOVE_HEAD_Y = 0.0       # the band now reaches the top of the head (nose - 0.3 span = 6 px); 0 is above it
 
 
 def load_cfg(**overrides: object) -> dict:
@@ -221,7 +221,7 @@ def test_zone_swipes_tag_top_and_bottom():
     from fitcast.gestures import GestureDetector as Gestures
     cfg = dict(yaml.safe_load(open("config.yaml"))["gestures"])
     cfg["zone_swipes"] = True
-    for wrist_dy, suffix in ((-0.6, "_top"), (0.6, "_bottom")):     # shoulder-width units below the shoulder line
+    for wrist_dy, suffix in ((0.3, "_top"), (1.0, "_bottom")):      # shoulder-width units below the shoulder line (hips at 1.1)
         g = Gestures(cfg)
         events = []
         for i in range(12):
