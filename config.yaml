@@ -170,7 +170,7 @@ calibration:
   refine_done_px: 4         # --refine: stop when the measured offset is below this (camera px)
   refine_wait_s: 20         # --refine: wait this long for a tracked person before giving up
   refine_max_px: 150        # --refine: offsets above this are rejected (wrong person / disc off the body)
-  refine_depth_change_frac: 0.08   # --refine: torso length differing from the reference spot by more than this = second depth point
+  refine_depth_change_frac: 0.25   # --refine --depth-point: torso length must differ from the reference spot by at least this (noise otherwise)
   refine_still_px: 3        # --refine: torso centre must move less than this per frame for 10 frames before probing
   refine_max_disagreement_px: 30   # --refine: chest and belly probes must agree within this, else the pass is discarded
 
