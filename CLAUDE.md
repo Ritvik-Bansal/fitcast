@@ -7,7 +7,7 @@ the clothes. Mirror faces the person.
 
 **Safety rule that overrides everything: never project garment light onto the head.
 `compositor.compose()` overwrites `track.head_box` with a flat dim fill
-(`compositor.head_fill_level`, default 0 = black, hard cap 25% grey) as its LAST
+(`compositor.head_fill_level`, default 0 = black, hard cap 43% grey) as its LAST
 operation, every frame, no exceptions. Never patterns, never garment pixels there.**
 
 ## Pipeline

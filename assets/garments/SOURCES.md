@@ -28,3 +28,12 @@ Drawn by `scripts/procedural_garments.py` (no third-party content):
 - `cargo_olive`: olive twill cargo pants, wide legs, bellows pockets (17_olive_overshirt_cargo, 21_oversized_tee_cargo)
 - `chinos_khaki`: khaki slim chinos with pressed creases (22_scout_overshirt_chinos)
 - `sweatpants_heather`: heather-grey joggers, ribbed waistband and cuffs, drawcord (19_hoodie_sweatpants)
+
+## Bottoms (scripts/fetch_garments_bottoms.py)
+
+Real product/museum photos downloaded from Wikimedia Commons by `scripts/fetch_garments_bottoms.py`,
+cut out, laid out over `bottom_size` and colour-boosted (derivative works under the same license).
+Tops are copied from the outfit folder named in the build log. Raw downloads: `_raw_bottoms/`.
+
+| garment | outfits | file | author | license |
+|---|---|---|---|---|

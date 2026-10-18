@@ -19,7 +19,7 @@ class Compositor:
         self.cfg = cfg
         self.W, self.H = size
         self.gallery_layer: np.ndarray | None = None
-        self.head_fill = int(min(max(int(cfg.get('head_fill_level', 0)), 0), 64))   # <= 25% of full white
+        self.head_fill = int(min(max(int(cfg.get('head_fill_level', 0)), 0), 110))  # <= 43% of full white (user-approved)
         self.lit_px = 0
         self.rect_right: list[int] | None = None
         self.rect_msg: list[int] | None = None

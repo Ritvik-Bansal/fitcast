@@ -135,7 +135,7 @@ compositor:
   brightness: 1.0
   gamma: 1.0
   fade_ms: 400              # fade out/in when tracking is lost/regained
-  head_fill_level: 30       # flat grey on the head box (0 = black). Hard cap 64 (25%): never bright, never garment pixels
+  head_fill_level: 90       # flat grey on the head box (0 = black). Hard cap 110 (43%): never garment pixels
   gallery:
     enabled: true
     rect: [20, 40, 300, 700]   # x0 y0 x1 y1, camera px; set during calibration so it lands on the wall
