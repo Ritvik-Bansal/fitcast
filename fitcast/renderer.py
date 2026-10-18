@@ -18,6 +18,7 @@ def _src_quad(img: np.ndarray, region: tuple[float, float, float, float]) -> np.
 
 class Renderer:
     """Per-part perspective warps: bottoms, torso, sleeves (draw order), feathered and alpha-composited."""
+    _last_from_behind = False
 
     def __init__(self, cfg: dict, size: tuple[int, int], min_visibility: float = 0.5) -> None:
         self.cfg = cfg
@@ -58,7 +59,12 @@ class Renderer:
         if not self._vis(v, L_SHOULDER, R_SHOULDER, L_HIP, R_HIP):
             return
         # in side view pick front/back by shoulder order so a 3/4-back pose does not show the front graphic
-        from_behind = facing == "back" or (facing == "side" and j[L_SHOULDER, 0] < j[R_SHOULDER, 0])
+        # side view keeps whatever was shown last: deciding it from the shoulder order flips the texture every frame
+        if facing == "side":
+            from_behind = self._last_from_behind
+        else:
+            from_behind = facing == "back"
+        self._last_from_behind = from_behind
         tex = outfit.top_back if (from_behind and outfit.top_back is not None) else outfit.top_front
         if tex is None:
             return

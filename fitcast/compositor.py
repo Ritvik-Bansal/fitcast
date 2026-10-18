@@ -19,6 +19,8 @@ class Compositor:
         self.cfg = cfg
         self.W, self.H = size
         self.gallery_layer: np.ndarray | None = None
+        self.head_fill = int(min(max(int(cfg.get('head_fill_level', 0)), 0), 64))   # <= 25% of full white
+        self.lit_px = 0
         self.rect_right: list[int] | None = None
         self.rect_msg: list[int] | None = None
         self.msg_lines: list[str] = []
@@ -156,10 +158,12 @@ class Compositor:
                 self._draw_gallery(target, gallery, track, now, self.rect_right, "tops")
             self._draw_message(target, track, now)
 
-        # SAFETY: head blackout is always the last operation on the lit frame (and on the gallery layer).
+        self.lit_px = int(cv2.countNonZero(self._lit))
+        # SAFETY: the head box is always the last operation on the lit frame: a flat dim fill (`head_fill_level`,
+        # default 0 = black, hard cap 25%), never garment pixels. The gallery layer stays black there.
         x0, y0, x1, y1 = track.head_box
         if x1 > x0 and y1 > y0:
-            out[y0:y1, x0:x1] = 0
+            out[y0:y1, x0:x1] = self.head_fill
             if self.gallery_layer is not None:
                 self.gallery_layer[y0:y1, x0:x1] = 0
         np.copyto(self._held, out)

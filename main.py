@@ -183,6 +183,9 @@ class App:
         self.stylist = None
         self.recorder = None
         self.wake = None
+        self._stats: list[str] | None = [] if cfg["logging"].get("frame_stats", False) else None
+        if self._stats is not None:
+            Path(cfg["logging"].get("frame_stats_file", "out/frame_stats.csv")).write_text("t,ok,facing,sw,mask_px,lit_px,fallback,outfit\n")
         scfg = cfg.get("stylist", {})
         if (args.stylist or scfg.get("enabled", False)) and self.sensor_kind != "iphone":
             from fitcast.stylist import GeminiStylist, Recorder, load_api_key
@@ -690,6 +693,14 @@ class App:
         t1 = time.perf_counter()
         rgba = self.renderer.draw(track, self.gallery.current)
         comp = self.compositor.compose(rgba, track, self.gallery, now)
+        if self._stats is not None:
+            self._stats.append(f"{now:.3f},{int(track.ok)},{track.facing if track.ok else ''},{track.shoulder_width:.0f},"
+                               f"{int(cv2.countNonZero(track.clothes_mask)) if track.ok else 0},{self.compositor.lit_px},"
+                               f"{int(self.tracker.fallback_active)},{self.gallery.current.name}\n")
+            if len(self._stats) >= 150:
+                with open(self.cfg["logging"].get("frame_stats_file", "out/frame_stats.csv"), "a") as f:
+                    f.writelines(self._stats)
+                self._stats.clear()
         if self.show_skeleton:
             draw_skeleton_for_projector(comp, track, self.tracker.min_vis)
         if track.ok:

@@ -5,9 +5,10 @@ Person in all-white clothes stands on a floor mark; camera (iPhone Continuity
 or webcam) mounted on the projector tracks them; projector paints garments on
 the clothes. Mirror faces the person.
 
-**Safety rule that overrides everything: never project light onto the head.
-`compositor.compose()` forces `track.head_box` to black as its LAST operation,
-every frame, no exceptions.**
+**Safety rule that overrides everything: never project garment light onto the head.
+`compositor.compose()` overwrites `track.head_box` with a flat dim fill
+(`compositor.head_fill_level`, default 0 = black, hard cap 25% grey) as its LAST
+operation, every frame, no exceptions. Never patterns, never garment pixels there.**
 
 ## Pipeline
 

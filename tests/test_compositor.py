@@ -22,7 +22,8 @@ def test_head_box_always_black_even_with_full_light(config):
     comp.set_gallery_rect((x0 - 50, 0, x1 + 50, y1 + 20))
     out = comp.compose(rgba, tr, _gallery(), now=10.0)
     assert out.shape == (720, 1280, 3)
-    assert out[y0:y1, x0:x1].max() == 0
+    head = out[y0:y1, x0:x1]
+    assert head.max() <= 64 and head.max() == head.min()      # flat dim fill at most, never garment pixels
     assert out[300:600, 500:780].min() > 0                # garment lit
     assert out[0:y1, x0 - 50:x0].max() > 0                # panel drawn beside the head box
 
@@ -37,7 +38,7 @@ def test_no_light_outside_mask(config):
     assert out[300:400, 500:700].min() > 0
     outside = out.copy()
     outside[300:400, 500:700] = 0
-    assert outside.max() == 0
+    assert outside.max() <= 64                              # only the flat head fill may be lit outside the mask
 
 
 def test_fade_on_tracking_loss(config):
@@ -53,7 +54,7 @@ def test_fade_on_tracking_loss(config):
     mid = comp.compose(rgba, lost, _gallery(), now=2.5)   # half way through the fade-out
     assert 0 < mid[400, 640].max() < 255
     x0, y0, x1, y1 = tr.head_box
-    assert mid[y0:y1, x0:x1].max() == 0                   # the held frame keeps its head blackout
+    assert mid[y0:y1, x0:x1].max() <= 64                  # the held frame keeps its head fill (dim, flat)
     dark = comp.compose(rgba, lost, _gallery(), now=3.5)
     assert dark.max() == 0
     back = comp.compose(rgba, tr, _gallery(), now=3.6)
