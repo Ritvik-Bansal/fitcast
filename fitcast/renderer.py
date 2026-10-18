@@ -75,9 +75,11 @@ class Renderer:
         wu, wf = 0.5 * c["upper_arm_width_frac"] * sw, 0.5 * c["forearm_width_frac"] * sw
         overlap = c["sleeve_overlap_frac"] * sw
         t = self.taper
+        short_frac = float(c.get("short_sleeve_frac", 1.0))
         for sh, el, wr in ((L_SHOULDER, L_ELBOW, L_WRIST), (R_SHOULDER, R_ELBOW, R_WRIST)):
             if self._vis(v, sh, el):
-                self._warp_part(tex, src, geo.limb_quad(j[sh, :2], j[el, :2], wu, wu * t["upper_arm"], extend0=overlap))
+                end = j[el, :2] if outfit.sleeve == "long" else j[sh, :2] + short_frac * (j[el, :2] - j[sh, :2])
+                self._warp_part(tex, src, geo.limb_quad(j[sh, :2], end, wu, wu * t["upper_arm"], extend0=overlap))
             if outfit.sleeve == "long" and self._vis(v, el, wr):
                 self._warp_part(tex, src, geo.limb_quad(j[el, :2], j[wr, :2], wf, wf * t["forearm"],
                                                         extend0=overlap * t["forearm_overlap"]))

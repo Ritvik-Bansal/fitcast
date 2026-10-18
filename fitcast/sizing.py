@@ -40,7 +40,10 @@ def recommend_size(value_cm: float, table: dict, measure: str | None = None) -> 
     `table` is one entry of `sizing.charts`; `measure` defaults to `table["key"]`.
     Values past the last bound map to the last (largest) size.
     """
-    for size, bound in zip(table["sizes"], table[measure or table["key"]]):
+    measure = measure or table["key"]
+    if measure == "combined":
+        measure = "chest"                 # single-measure callers of a combined chart use the chest column
+    for size, bound in zip(table["sizes"], table[measure]):
         if bound >= value_cm:
             return size
     return table["sizes"][-1]
@@ -64,7 +67,8 @@ class SizeEstimator:
         self._circ_factor = float(cfg.get("chest_circumference_factor",
                                           _DEFAULTS["chest_circumference_factor"]))
         for name, chart in cfg["charts"].items():
-            if len(chart[chart["key"]]) != len(chart["sizes"]):
+            cols = ("shoulder", "chest") if chart["key"] == "combined" else (chart["key"],)
+            if any(len(chart[c]) != len(chart["sizes"]) for c in cols):
                 raise ValueError(f"sizing.charts.{name}: '{chart['key']}' bounds and 'sizes' differ in length")
         self.height_cm = float(cfg["height_cm"] if height_cm is None else height_cm)
         self._buf: deque[Measurements] = deque(maxlen=int(cfg["average_frames"]))
@@ -134,9 +138,17 @@ class SizeEstimator:
             return NO_DATA_TEXT
         table = self._table(size_table)
         chest = m.chest_cm * self._circ_factor
-        value = {"shoulder": m.shoulder_cm, "chest": chest, "torso": m.torso_cm,
-                 "inseam": m.inseam_cm}.get(table["key"])
-        size_text = "Size: --" if value is None else f"Size {self._stable_size(recommend_size(value, table))} (estimate)"
+        shoulder = m.shoulder_cm * float(self.cfg.get("shoulder_landmark_factor", 1.0))
+        key = table["key"]
+        if key == "combined":
+            sizes = table["sizes"]
+            i_s = sizes.index(recommend_size(shoulder, table, "shoulder"))
+            i_c = sizes.index(recommend_size(chest, table, "chest"))
+            size = sizes[int(round((i_s + i_c) / 2))]
+            size_text = f"Size {self._stable_size(size)} (estimate)"
+        else:
+            value = {"shoulder": shoulder, "chest": chest, "torso": m.torso_cm, "inseam": m.inseam_cm}.get(key)
+            size_text = "Size: --" if value is None else f"Size {self._stable_size(recommend_size(value, table))} (estimate)"
         inseam = "--" if m.inseam_cm is None else f"{m.inseam_cm:.0f} cm"
         measure_text = (f"Shoulder {m.shoulder_cm:.0f} cm  Chest {chest:.0f} cm  "
                         f"Torso {m.torso_cm:.0f} cm  Inseam {inseam}")

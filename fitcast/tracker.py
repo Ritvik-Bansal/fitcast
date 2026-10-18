@@ -201,7 +201,8 @@ class MediaPipeBackend:
             output_segmentation_masks=True))
         self.seg = vision.ImageSegmenter.create_from_options(vision.ImageSegmenterOptions(
             base_options=BaseOptions(model_asset_path=cfg["seg_model"]),
-            running_mode=vision.RunningMode.VIDEO, output_category_mask=True, output_confidence_masks=False))
+            running_mode=vision.RunningMode.VIDEO, output_category_mask=False, output_confidence_masks=True))
+        self.seg_thr = float(cfg.get("seg_confidence_threshold", 0.5))
         self.has_person_mask = True
         self._rgb: np.ndarray | None = None
         self._last_ms = -1
@@ -240,10 +241,18 @@ class MediaPipeBackend:
         return self.segment_image(self._img, ms)
 
     def segment_image(self, img, ms: int) -> np.ndarray:
-        """Segment a prepared mp.Image (used by the worker thread). Returns a (H,W) uint8 view."""
+        """Segment a prepared mp.Image (used by the worker thread). Returns a (H,W) uint8 label map built from
+        the bilinear confidence masks (smooth edges; the category mask is nearest-neighbour and blocky).
+        Labels: 1 hair, 2 body-skin, 3 face-skin, 4 clothes (clothes wins ties)."""
         r = self.seg.segment_for_video(img, ms)
-        cat = r.category_mask.numpy_view()
-        return cat[:, :, 0] if cat.ndim == 3 else cat
+        conf = r.confidence_masks
+        def m(i):
+            a = conf[i].numpy_view()
+            return a[:, :, 0] if a.ndim == 3 else a
+        cat = np.zeros(m(4).shape, np.uint8)
+        for label in (2, 1, 3, 4):           # later labels overwrite earlier ones
+            cat[m(label) > self.seg_thr] = label
+        return cat
 
     def image_copy(self, frame_bgr: np.ndarray, buf: tuple | None = None) -> tuple:
         """(mp.Image, rgb buffer) with its own RGB memory, safe to hand to the worker thread.
@@ -315,17 +324,17 @@ class SegWorker(threading.Thread):
         self.failed = False
         self.last_ms = 0.0
 
-    def submit(self, img, ms: int) -> bool:
-        """Hand a frame to the worker; returns False (frame skipped) when it is still busy."""
+    def submit(self, img, ms: int, rect: tuple[int, int, int, int] | None = None) -> bool:
+        """Hand a frame (+ the camera-space rect it was cropped from) to the worker; False when still busy."""
         with self._cv:
             if self.busy:
                 return False
-            self._req, self.busy = (img, ms), True
+            self._req, self.busy = (img, ms, rect), True
             self._cv.notify()
         return True
 
-    def latest(self) -> np.ndarray | None:
-        """Newest finished category mask (a private copy) or None if nothing new since the last call."""
+    def latest(self) -> tuple[np.ndarray, tuple | None] | None:
+        """Newest finished (label map copy, crop rect) or None if nothing new since the last call."""
         with self._cv:
             r, self._result = self._result, None
         return r
@@ -342,11 +351,11 @@ class SegWorker(threading.Thread):
                     self._cv.wait()
                 if self._quit:
                     return
-                img, ms = self._req
+                img, ms, rect = self._req
                 self._req = None
             t0 = time.perf_counter()
             try:
-                cat = self.backend.segment_image(img, ms).copy()
+                cat = (self.backend.segment_image(img, ms).copy(), rect)
             except Exception:  # noqa: BLE001 - must never die silently
                 log.exception("segmenter worker crashed; tracker switches to synchronous segmentation")
                 with self._cv:
@@ -392,6 +401,10 @@ class Tracker:
         self.k_skel = _ksize(mcfg["skeleton"]["dilate_px"])
         self.gate_thr = float(mcfg["person_gate_threshold"])
         self.area_jump = float(mcfg["area_jump_fallback"])
+        self.jump_frames = int(mcfg.get("area_jump_frames", 2))
+        self._jump_streak = 0
+        self.seg_crop_margin = float(mcfg.get("seg_crop_margin_frac", 0.25))
+        self._seg_rect: tuple[int, int, int, int] | None = None
         self.torso_fill = bool(mcfg["torso_fill"])
         self.fallback_hold = int(mcfg["fallback_hold_frames"])
         self.facing = FacingClassifier(cfg["facing"])
@@ -431,6 +444,20 @@ class Tracker:
 
     def reset_reference(self) -> None:
         self.facing.reset()
+
+    def _person_crop(self, joints: np.ndarray, vis: np.ndarray) -> tuple[int, int, int, int]:
+        """Camera-space rect around the detected person (+margin), clamped to the frame/ROI, even-aligned."""
+        pts = joints[vis > 0.2, :2] if (vis > 0.2).any() else joints[:, :2]
+        x0, y0 = pts.min(axis=0)
+        x1, y1 = pts.max(axis=0)
+        mx, my = self.seg_crop_margin * max(x1 - x0, 1), self.seg_crop_margin * max(y1 - y0, 1)
+        bx0, by0, bx1, by1 = (0, 0, self.W, self.H) if self.roi is None else self.roi
+        x0, y0 = int(max(bx0, x0 - mx)), int(max(by0, y0 - my))
+        x1, y1 = int(min(bx1, x1 + mx)), int(min(by1, y1 + my))
+        x0, y0 = x0 - (x0 % 2), y0 - (y0 % 2)
+        if x1 - x0 < 64 or y1 - y0 < 64:
+            return (bx0, by0, bx1, by1)
+        return (x0, y0, x1, y1)
 
     def set_roi(self, rect: tuple[int, int, int, int] | None, margin_frac: float = 0.0) -> None:
         """Restrict pose + segmentation to a camera-space rectangle (e.g. the projector's footprint): bystanders
@@ -491,23 +518,28 @@ class Tracker:
         if self.worker is not None and self.worker.failed:
             log.error("segmenter worker failed; continuing with synchronous segmentation (slower)")
             self.worker = None
-        def _store_cat(cat_small: np.ndarray) -> None:
-            if roi is None:
+        # segmenter input: a tight crop around the detected person (2x the mask resolution of a full frame)
+        seg_rect = self._person_crop(joints, vis)
+        def _store_cat(cat_small: np.ndarray, rect: tuple | None) -> None:
+            self._cat.fill(0)
+            if rect is None:
                 np.copyto(self._cat, cat_small)
             else:
-                self._cat.fill(0)
-                self._cat[roi[1]:roi[3], roi[0]:roi[2]] = cat_small
+                self._cat[rect[1]:rect[3], rect[0]:rect[2]] = cat_small
         if self.worker is not None:
             if (self._n - 1) % self.seg_every == 0:
                 self._flip ^= 1
-                self._rgb_buf[self._flip] = self.backend.image_copy(model_frame, self._rgb_buf[self._flip])
-                self.worker.submit(self._rgb_buf[self._flip][0], ms)
-            cat = self.worker.latest()
-            if cat is not None:
-                _store_cat(cat)
+                crop = np.ascontiguousarray(frame_bgr[seg_rect[1]:seg_rect[3], seg_rect[0]:seg_rect[2]])
+                self._rgb_buf[self._flip] = self.backend.image_copy(crop, self._rgb_buf[self._flip])
+                self.worker.submit(self._rgb_buf[self._flip][0], ms, seg_rect)
+            res = self.worker.latest()
+            if res is not None:
+                _store_cat(*res)
                 seg_ms = self.worker.last_ms
         elif (self._n - 1) % self.seg_every == 0:
-            _store_cat(self.backend.segment(model_frame, ms))
+            crop = np.ascontiguousarray(frame_bgr[seg_rect[1]:seg_rect[3], seg_rect[0]:seg_rect[2]])
+            self.backend._img = self.backend._image(crop)
+            _store_cat(self.backend.segment(crop, ms), seg_rect)
         t2 = time.perf_counter()
 
         sw = geo.shoulder_width(joints)
@@ -539,8 +571,13 @@ class Tracker:
 
         # automatic fallback when the clothes area jumps frame to frame (projection confusing the segmenter).
         # A reference of 0 means "no mask yet" (person just appeared / first async result), not a jump.
+        # The jump must persist `area_jump_frames` consecutive frames so one segmenter glitch does not flip the mask.
         if self._prev_area > 0 and area > 0 and abs(area - self._prev_area) / self._prev_area > self.area_jump:
-            self._fallback_left = self.fallback_hold
+            self._jump_streak += 1
+            if self._jump_streak >= self.jump_frames:
+                self._fallback_left = self.fallback_hold
+        else:
+            self._jump_streak = 0
         self._prev_area = area
         self.fallback_active = self._fallback_left > 0
         if self._fallback_left > 0:
@@ -553,7 +590,11 @@ class Tracker:
         if mode == "clothes":
             np.copyto(mask, self._clothes)
         elif mode == "skeleton":
-            np.copyto(mask, self._skel)
+            if person is not None:          # fallback stays inside the person's silhouette (never fatter than the body)
+                np.copyto(self._tmp, self._pf, casting="unsafe")
+                cv2.bitwise_and(self._skel, self._tmp, dst=mask)
+            else:
+                np.copyto(mask, self._skel)
         else:
             box_dilate(self._skel, self.k_skel, self._tmp, self._tmp2)
             cv2.bitwise_and(self._clothes, self._tmp, dst=mask)
