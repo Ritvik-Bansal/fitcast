@@ -184,3 +184,43 @@ See `PROGRESS.md` for the raw logs. Summary:
 
 The test clips are 25 fps, so an offline run can never show more than 25 fps achieved; the
 "capacity" number is what the loop can sustain with a 30/60 fps camera.
+
+## 9. 3D path: iPhone 17 Pro LiDAR (depth-correct projection)
+
+The 2D path maps camera pixels to projector pixels with one homography, exact at one depth only. The 3D path
+(`--sensor iphone`) streams LiDAR depth, person segmentation and Vision body joints from the phone and renders
+each camera pixel through its true 3D position (`fitcast/render3d.py`), after a full projector calibration
+(`scripts/calibrate3d.py`). Spec: `docs/BUILD_SPEC_3D.md`.
+
+### Setup (once)
+1. Phone: iPhone 17 Pro, USB cable, unlocked, "Trust This Computer", Developer Mode on. Clamp it on top of the
+   projector, lens next to the projector lens, LANDSCAPE with the USB-C port on the right. Disable auto-lock.
+2. Mac: `scripts/ios_deploy.sh` builds `ios/FitCastSensor`, installs and launches it (signing: your Apple ID team).
+3. In the app, tab "Capability": wait for the 10 s fps measurement; it must say `sceneDepth` present and ~60 fps.
+   Tab "Stream": the joint overlay must sit on the body; if not, change the orientation picker (should be `.up`).
+4. Mac receiver check: `.venv/bin/python -m fitcast.sensors.fake_phone` is the offline stand-in;
+   live: `main.py --sensor iphone --no-projector` shows camera + depth-mask overlay and sensor fps/latency in the status line.
+
+### Calibration (every time the rig moves)
+1. Put two boxes or foam boards at the floor mark, at different angles, in front of the wall. Empty beam.
+2. `.venv/bin/python scripts/calibrate3d.py --sensor iphone` projects 44 Gray-code patterns + white/black (about
+   30 s), lifts every decoded pixel with LiDAR depth and solves the projector intrinsics and pose.
+   Expected: reprojection < 1.5 px RMS, tens of thousands of correspondences, `calibration3d.yaml` written.
+   Simulated reference: `--simulate` gives 0.41 px / focal 0.013% / 0.003 deg / 0.4 mm.
+3. Verification pattern (projected at the end): grid lines must sit on the boxes' edges within ~1 cm.
+4. Remove the boxes. `main.py --sensor iphone --demo`. First 2 s: nobody in the beam (depth background is
+   learned; key `b` relearns). Then the person steps on the mark.
+
+### Measuring instead of guessing
+- `scripts/accuracy_check.py --sensor iphone [--turn] --report`: projected body outline vs depth silhouette in mm
+  (targets: still median < 10 mm, p95 < 20 mm; slow turn median < 25 mm).
+- `scripts/latency_probe.py --method loopback-camera`: true light-to-light latency; `--method video` for a
+  slow-motion recording. `main.py`'s "latency" number is capture-to-display only.
+
+### Demo-day checklist (2 minutes)
+1. Projector on, extended display, no keystone. Phone clamped, cable in, unlocked, app running, "Stream" tab.
+2. `scripts/calibrate3d.py --sensor iphone` with the boxes (only if the rig moved since last time).
+3. Boxes out, beam empty, `main.py --sensor iphone --demo --height <cm>`; wait for "depth background learned".
+4. Person on the mark: check collar and hem, swipe once each way, turn once. `k` shows the skeleton on the body
+   if anything looks off; `[`/`]` nudges; `b` relearns the background if someone walked through.
+5. Fallback if the phone misbehaves: `main.py --sensor webcam` with the 2D calibration (`calibrate.py --auto`, `--refine`).
