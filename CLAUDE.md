@@ -103,9 +103,14 @@ ARKit camera coords (+x right, +y up, -z forward; NaN when no valid depth),
 `blobs`: list of {name, dtype, shape, offset, nbytes} describing the payload:
 `depth` float16 (depth_h, depth_w) metres; `conf` uint8 (depth_h, depth_w) 0..2 (ARKit confidence);
 `seg` uint8 (seg_h, seg_w) 0/255 person segmentation (optional); `rgb` JPEG bytes (optional).
+Extra frame fields the app sends: `seq`, `pose_ts` (ARFrame timestamp the joints came from), `fps`, `pose_fps`,
+`depth_valid_frac`, `thermal_state`, `focus_locked`, `orientation`, `dropped`. Missing joints are `[null, null, 0]` /
+`[null, null, null]` (decoded as NaN). Ping (msg_type 3): the Mac sends `{"mac_ts", "id"}`, the phone echoes every key
+and adds `phone_ts`. Info (msg_type 2) on connect carries the capability report.
 Depth intrinsics = K scaled by depth_w/img_w, depth_h/img_h. The Mac converts ARKit camera coords to OpenCV
-(y and z negated). Transport: the phone is a TCP server on `sensor.port` (7777); the Mac connects over
-`pymobiledevice3` usbmux port forwarding (USB) or a Wi-Fi IP.
+(y and z negated). Transport: the phone is a TCP server on `sensor.port` (7777); the Mac connects through a plain
+usbmuxd `Connect` on /var/run/usbmuxd (stdlib client in `fitcast/sensors/iphone.py`) or a Wi-Fi IP (`--sensor-host`).
+Deploy: `scripts/ios_deploy.sh` (xcodegen + xcodebuild for the connected device + devicectl install/launch).
 
 ### Vision 19 -> MediaPipe 33 joint mapping
 nose 0, left_eye 2, right_eye 5, left_ear 7, right_ear 8, left_shoulder 11, right_shoulder 12, left_elbow 13,

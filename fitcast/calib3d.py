@@ -233,7 +233,10 @@ def _dlt(X: np.ndarray, x: np.ndarray) -> np.ndarray:
     A = np.zeros((2 * len(X), 12))
     A[0::2, 0:4], A[0::2, 8:12] = Xh, -x[:, :1] * Xh
     A[1::2, 4:8], A[1::2, 8:12] = Xh, -x[:, 1:2] * Xh
-    return np.linalg.svd(A)[2][-1].reshape(3, 4)
+    # smallest right-singular vector via the 12x12 normal matrix: a full SVD of the (2N x 12) system allocates
+    # a (2N x 2N) U matrix (tens of GB for N = 45 000 inliers) and got the process OOM-killed
+    _, vecs = np.linalg.eigh(A.T @ A)
+    return vecs[:, 0].reshape(3, 4)
 
 
 def _similarity(p: np.ndarray) -> np.ndarray:

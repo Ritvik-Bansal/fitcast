@@ -231,7 +231,10 @@ class App:
         if a.record:
             Path(a.record).parent.mkdir(parents=True, exist_ok=True)
             w, h = self.size
-            self.writer = cv2.VideoWriter(a.record, cv2.VideoWriter_fourcc(*"mp4v"), self.source.native_fps, (2 * w, h))
+            fps = float(self.source.native_fps)
+            if not (1.0 < fps <= 120.0):
+                fps = float(self.cfg["capture"]["fps"])        # sensors report 0 until frames flow
+            self.writer = cv2.VideoWriter(a.record, cv2.VideoWriter_fourcc(*"mp4v"), fps, (2 * w, h))
             log.info("recording review video to %s", a.record)
         t_start = time.perf_counter()
         last_seq = -1
