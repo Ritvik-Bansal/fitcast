@@ -39,6 +39,11 @@ class Compositor:
         y = np.clip((x ** (1.0 / max(gamma, 1e-3))) * brightness, 0.0, 1.0)
         return (y * 255.0 + 0.5).astype(np.uint8)
 
+    @property
+    def fade(self) -> float:
+        """Current tracking-loss fade factor (1 = fully lit, 0 = black)."""
+        return float(self._fade)
+
     def set_brightness_gamma(self, brightness: float, gamma: float) -> None:
         self._lut = self._make_lut(brightness, gamma)
 

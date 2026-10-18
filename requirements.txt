@@ -7,4 +7,8 @@ pyyaml==6.0.3
 onnxruntime==1.31.0
 pyobjc-framework-Cocoa==12.2.2
 pytest==9.1.1
+# 3D path (iPhone LiDAR, docs/BUILD_SPEC_3D.md)
+moderngl==5.13.0
+glcontext==3.1.0
+pymobiledevice3==11.34.1   # optional: usbmux device listing; the receiver's own usbmuxd client needs no package
 # Optional RTMPose backend: see requirements-rtm.txt (must be installed with --no-deps).

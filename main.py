@@ -82,8 +82,11 @@ class App:
             cap_cfg["video_realtime"] = False
         if args.no_window and not args.loop:
             cap_cfg["video_loop"] = False          # headless review runs process the file exactly once
-        self.size = (int(cap_cfg["width"]), int(cap_cfg["height"]))
         self.sensor_kind = args.sensor or cfg["sensor"].get("kind", "webcam")
+        if self.sensor_kind == "iphone":
+            cs = cfg["sensor"].get("cam_size", [960, 720])          # 4:3 like the phone: square pixels for sizing
+            cap_cfg["width"], cap_cfg["height"] = int(cs[0]), int(cs[1])
+        self.size = (int(cap_cfg["width"]), int(cap_cfg["height"]))
         self.depth_mask = None
         self.proj3d = None
         self._bg_depth: list = []
@@ -107,10 +110,8 @@ class App:
         self.compositor = Compositor(cfg["compositor"], self.size)
         self.calib = Calibration(cfg["calibration"], self.size)
         is_file = getattr(self.source, "is_file", False)
-        self.calib.load(args.calibration, allow_simulated=is_file)   # a fake homography is fine for clips, never live
+        self.calib3d = None
         if self.sensor_kind == "iphone":
-            from fitcast.depthmask import DepthBodyMask
-            self.depth_mask = DepthBodyMask(cfg["depthmask"], self.size, self.size)   # depth arrives resampled to camera res
             from pathlib import Path as _P
             c3d_path = args.calibration3d or cfg["calibration3d"]["file"]
             if _P(c3d_path).exists():
@@ -119,10 +120,14 @@ class App:
                 log.info("3D calibration %s loaded (reproj %.2f px, %d points)", c3d_path,
                          self.calib3d.reproj_error_px, self.calib3d.n_points)
             else:
-                self.calib3d = None
-                log.warning("no %s: depth-correct rendering disabled, falling back to the 2D homography. "
-                            "Run scripts/calibrate3d.py --sensor iphone.", c3d_path)
-        if self.calib.ok and getattr(self.calib.data, "gallery_rect", None):
+                log.warning("no %s: depth-correct rendering disabled, falling back to the 2D homography "
+                            "(calibration.yaml, webcam camera space!). Run scripts/calibrate3d.py --sensor iphone.", c3d_path)
+        if self.calib3d is None:
+            self.calib.load(args.calibration, allow_simulated=is_file)   # a fake homography is fine for clips, never live
+        # depth mask runs at the sensor's depth resolution (set up on the first frame, see _step_sensor_track)
+        self._proj_cache: np.ndarray | None = None
+        self._K_warned = False
+        if self.calib.ok and getattr(self.calib.data, "gallery_rect", None) and self.sensor_kind != "iphone":
             self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
         if self.calib.ok and tcfg.get("roi_from_calibration", True) and not args.no_roi and self.sensor_kind != "iphone":
             # only track inside the projector footprint (+margin): bystanders beside the rig are ignored
@@ -166,6 +171,7 @@ class App:
         self.pump_every = max(1, int(cfg["display"].get("pump_every_n", 1)))
         self._torso_ema: float | None = None
         self.depth_shift = (0.0, 0.0)
+        self._depth_render: np.ndarray | None = None
         self._last_reopen = 0.0
         self.predict_auto = bool(cfg["smoothing"]["predict_auto"])
         self.predict_max_ms = float(cfg["smoothing"]["predict_max_ms"])
@@ -213,7 +219,7 @@ class App:
             log.info("renderer.vertical_offset_frac = %.2f (shoulder widths; put this in config.yaml to keep it)",
                      self.renderer.vertical_offset_frac)
         elif k == ord("r"):
-            if self.calib.load(self.args.calibration, allow_simulated=self.source.is_file):
+            if self.calib.load(self.args.calibration, allow_simulated=getattr(self.source, "is_file", False)):
                 if self.calib.data.gallery_rect:
                     self.compositor.set_gallery_rect(self.calib.data.gallery_rect)
                 log.info("calibration reloaded")
@@ -296,32 +302,62 @@ class App:
         return 0
 
     def _step_sensor_track(self, frame: np.ndarray, ts: float):
-        """iPhone path: phone joints + depth-based person mask -> tracker's mask/head/facing logic."""
-        st = self.source.track()
-        if st is None or not st.ok:
-            return self.tracker.process_external(frame, ts, np.zeros((33, 3), np.float32), np.zeros((33,), np.float32), None)
-        person = None
-        if self.depth_mask is not None and st.depth is not None:
-            conf = self.source.last_conf
-            if conf is None:
-                conf = np.full(st.depth.shape, 2, np.uint8)
-            if not self.depth_mask.ready:
-                # learn the empty-scene background from the first N frames (operator stays out of the beam)
-                self._bg_depth.append(st.depth.copy()); self._bg_conf.append(conf.copy())
+        """iPhone path: phone joints + depth-based person mask -> tracker's mask/head/facing logic.
+        The depth background is learned from frames where NOBODY is tracked (empty scene); the mask module runs at
+        the sensor's depth resolution and upsamples itself."""
+        lt = self.source.latest()
+        st = None if lt is None else lt["track"]
+        empty = self.tracker.process_external(frame, ts, np.zeros((33, 3), np.float32), np.zeros((33,), np.float32), None)
+        if st is None or lt["depth_raw"] is None:
+            return empty
+        depth_raw, conf_raw = lt["depth_raw"], lt["conf_raw"]
+        if conf_raw is None:
+            conf_raw = np.full(depth_raw.shape, 2, np.uint8)
+        dh, dw = depth_raw.shape[:2]
+        if self.depth_mask is None:
+            from fitcast.depthmask import DepthBodyMask
+            self.depth_mask = DepthBodyMask(self.cfg["depthmask"], (dw, dh), self.size)
+            log.info("depth mask at sensor resolution %dx%d -> camera space %dx%d", dw, dh, *self.size)
+        if st.K_cam is not None:
+            K_d = np.array(st.K_cam, np.float64).copy()
+            K_d[0, :] *= dw / self.size[0]
+            K_d[1, :] *= dh / self.size[1]
+            self.depth_mask.set_intrinsics(K_d)
+        if not self.depth_mask.ready:
+            if not st.ok:                                   # only the empty scene goes into the background
+                self._bg_depth.append(np.asarray(depth_raw, np.float32).copy()); self._bg_conf.append(conf_raw.copy())
                 need = int(self.cfg["depthmask"]["background_frames"])
                 if len(self._bg_depth) >= need:
-                    if st.K_cam is not None:
-                        self.depth_mask.set_intrinsics(st.K_cam)
                     self.depth_mask.learn_background(self._bg_depth, self._bg_conf)
                     self._bg_depth.clear(); self._bg_conf.clear()
-                    log.info("depth background learned (%d frames); person may step in", need)
-            else:
-                if st.K_cam is not None:
-                    self.depth_mask.set_intrinsics(st.K_cam)
-                person = self.depth_mask.compute(st.depth, conf, frame, person_seg=self.source.last_seg)
+                    log.info("depth background learned (%d empty-scene frames); person may step in", need)
+            elif self.frames % 60 == 0:
+                log.warning("depth background not learned yet: step OUT of the beam for 2 s (key b restarts)")
+            return empty                                     # no garment until the background exists
+        if not st.ok:
+            return empty
+        person = self.depth_mask.compute(np.asarray(depth_raw, np.float32), conf_raw, frame, person_seg=lt["seg"])
         track = self.tracker.process_external(frame, ts, st.joints, st.visibility, person)
         track.depth, track.joints3d, track.K_cam = st.depth, st.joints3d, st.K_cam
         return track
+
+    def _depth_for_render(self, track) -> np.ndarray:
+        """Depth used by the GPU projector: the head box is forced to an opaque surface at body depth so wall
+        content seen beside/through a depth-less head can never be projected onto the head."""
+        d = track.depth
+        x0, y0, x1, y1 = track.head_box
+        if x1 <= x0 or y1 <= y0:
+            return d
+        body = d[track.clothes_mask > 0] if track.clothes_mask is not None else d[d > 0]
+        body = body[body > 0]
+        fill = float(np.median(body)) if body.size else float(np.median(d[d > 0])) if (d > 0).any() else 0.0
+        if fill <= 0:
+            return d
+        if self._depth_render is None or self._depth_render.shape != d.shape:
+            self._depth_render = np.empty_like(d)
+        np.copyto(self._depth_render, d)
+        self._depth_render[y0:y1, x0:x1] = fill
+        return self._depth_render
 
     def relearn_background(self) -> None:
         """Key b: forget the depth background and learn it again from the next N frames (step out of the beam)."""
@@ -364,15 +400,26 @@ class App:
             self._torso_ema = t_px if self._torso_ema is None else 0.8 * self._torso_ema + 0.2 * t_px
         shift = self.calib.depth_shift(self._torso_ema)
         self.depth_shift = shift
-        if self.sensor_kind == "iphone" and getattr(self, "calib3d", None) is not None and track.depth is not None:
+        if self.sensor_kind == "iphone" and self.calib3d is not None:
             if self.proj3d is None:
                 from fitcast.render3d import DepthMeshProjector
                 c = self.calib3d
-                self.proj3d = DepthMeshProjector(self.cfg["render3d"], self.size, tuple(c.proj_size),
-                                                 np.asarray(track.K_cam if track.K_cam is not None else c.K_cam),
+                self.proj3d = DepthMeshProjector(self.cfg["render3d"], self.size, tuple(c.proj_size), np.asarray(c.K_cam),
                                                  np.asarray(c.K_p), np.asarray(c.dist_p), np.asarray(c.R), np.asarray(c.t))
+                self._proj_cache = np.zeros((int(c.proj_size[1]), int(c.proj_size[0]), 3), np.uint8)
                 log.info("depth-correct GPU projection active")
-            proj = self.proj3d.render(comp, track.depth)
+            if track.ok and track.depth is not None:
+                if track.K_cam is not None and not self._K_warned:
+                    dev = float(np.abs(np.asarray(track.K_cam) - np.asarray(self.calib3d.K_cam)).max())
+                    if dev > float(self.cfg["render3d"].get("k_drift_warn_px", 5.0)):
+                        log.warning("live camera intrinsics differ from calibration3d by %.1f px (focus/zoom changed?): "
+                                    "recalibrate with scripts/calibrate3d.py", dev)
+                        self._K_warned = True
+                proj = self.proj3d.render(comp, self._depth_for_render(track))
+                np.copyto(self._proj_cache, proj)
+            else:
+                # tracking lost: fade exactly what was last projected (projector space); never the 2D mapping
+                proj = cv2.convertScaleAbs(self._proj_cache, alpha=self.compositor.fade, beta=0)
         else:
             proj = self.calib.to_projector(comp, shift)
         t2 = time.perf_counter()

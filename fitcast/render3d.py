@@ -290,7 +290,7 @@ class DepthMeshProjector:
             self._depth_tex = ctx.texture((w, h), 1, dtype="f4")
             self._depth_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)
             self._image_tex = ctx.texture((w, h), 3, dtype="f1")
-            self._image_tex.filter = (moderngl.LINEAR, moderngl.LINEAR)
+            self._image_tex.filter = (moderngl.NEAREST, moderngl.NEAREST)   # LINEAR bled light across the head-box edge
             self._image_tex.repeat_x = self._image_tex.repeat_y = False
             self._mesh_tex = ctx.texture((pw, ph), 4, dtype="f1")
             self._dil_tex = ctx.texture((pw, ph), 4, dtype="f1")

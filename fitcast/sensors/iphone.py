@@ -269,6 +269,17 @@ class IPhoneSensor:
         with self._lock:
             return self._track
 
+    def latest(self) -> dict | None:
+        """Everything from the newest frame under ONE lock (image, ts, seq, track, conf, seg, raw depth/conf), so
+        the caller never pairs frame N's image with frame N+1's track."""
+        with self._lock:
+            if self._latest is None:
+                return None
+            image, t_recv, seq = self._latest
+            return {"image": image, "ts": t_recv, "seq": seq, "track": self._track, "conf": self.last_conf,
+                    "seg": self.last_seg, "depth_raw": self.last_depth_raw, "conf_raw": self.last_conf_raw,
+                    "header": self.last_header}
+
     # -- connection --------------------------------------------------------
     def _connect(self) -> socket.socket:
         port, timeout = int(self.cfg["port"]), float(self.cfg["connect_timeout_s"])

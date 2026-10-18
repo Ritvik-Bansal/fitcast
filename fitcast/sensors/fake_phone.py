@@ -48,8 +48,11 @@ class FakePhone:
                  img_size: tuple[int, int] = (1920, 1440), depth_size: tuple[int, int] = (256, 192),
                  rgb_size: tuple[int, int] = (640, 480), rgb_every: int = 1, jpeg_quality: int = 80,
                  focal_px: float = 1500.0, wall_m: float = 3.0, person_m: float = 2.2, hip_y_m: float = -0.1,
-                 body_width_m: float = 0.16, clock_offset_s: float = 1000.0, send_seg: bool = True) -> None:
+                 body_width_m: float = 0.16, clock_offset_s: float = 1000.0, send_seg: bool = True,
+                 person_after_s: float = 0.0) -> None:
         self.host, self.fps = host, float(fps)
+        self.person_after_s = float(person_after_s)      # empty scene (wall only, no joints) until then
+        self._t_start = time.perf_counter()
         self.img_size, self.depth_size, self.rgb_size = img_size, depth_size, rgb_size
         self.rgb_every, self.jpeg_quality = max(1, int(rgb_every)), int(jpeg_quality)
         self.K = [focal_px, focal_px, img_size[0] / 2.0, img_size[1] / 2.0]
@@ -122,7 +125,8 @@ class FakePhone:
         j3 = self.joints_arkit(t)
         uv = self.project(j3, self.img_size)
         dw, dh = self.depth_size
-        seg = self._silhouette(self.project(j3, self.depth_size), self.depth_size)
+        present = (time.perf_counter() - self._t_start) >= self.person_after_s
+        seg = self._silhouette(self.project(j3, self.depth_size), self.depth_size) if present else np.zeros((dh, dw), np.uint8)
         depth = self._wall.copy()
         depth[seg > 0] = self.person_m
         conf = np.full((dh, dw), 2, np.uint8)
@@ -132,7 +136,8 @@ class FakePhone:
             blobs["seg"] = seg
         if n % self.rgb_every == 0:
             img = self._rgb_bg.copy()
-            img[self._silhouette(self.project(j3, self.rgb_size), self.rgb_size) > 0] = 235
+            if present:
+                img[self._silhouette(self.project(j3, self.rgb_size), self.rgb_size) > 0] = 235
             cv2.putText(img, f"fake phone #{n}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 200, 255), 2)
             ok, jpg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
             blobs["rgb"] = jpg.tobytes()
@@ -140,8 +145,8 @@ class FakePhone:
         header = {"ts": now, "send_ts": now, "img_w": self.img_size[0], "img_h": self.img_size[1], "K": self.K,
                   "depth_w": dw, "depth_h": dh, "rgb_w": self.rgb_size[0], "rgb_h": self.rgb_size[1],
                   "joint_names": list(VISION_JOINTS),
-                  "joints2d": [[float(u), float(v), 0.9] for u, v in uv],
-                  "joints3d": j3.tolist()}
+                  "joints2d": [[float(u), float(v), 0.9] for u, v in uv] if present else [[None, None, 0.0]] * len(uv),
+                  "joints3d": j3.tolist() if present else [[None, None, None]] * len(uv)}
         return encode_frame(header, blobs, MSG_FRAME)
 
     # -- serving ---------------------------------------------------------------
@@ -200,6 +205,7 @@ def main() -> None:
     ap.add_argument("--rgb-every", type=int, default=1, help="send the rgb JPEG every Nth frame")
     ap.add_argument("--rgb-size", type=int, nargs=2, default=(960, 720), metavar=("W", "H"))
     ap.add_argument("--no-seg", action="store_true", help="omit the person segmentation blob")
+    ap.add_argument("--person-after", type=float, default=0.0, help="empty scene for this many seconds, then the person appears")
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     port = a.port
@@ -209,7 +215,7 @@ def main() -> None:
         with open(Path(__file__).resolve().parents[2] / "config.yaml") as f:
             port = int(yaml.safe_load(f)["sensor"]["port"])
     phone = FakePhone(a.host, port, a.fps, rgb_size=tuple(a.rgb_size), rgb_every=a.rgb_every,
-                      send_seg=not a.no_seg).start()
+                      send_seg=not a.no_seg, person_after_s=a.person_after).start()
     log.info("fake phone serving on %s:%d at %.0f fps (Ctrl-C to stop)", a.host, phone.port, a.fps)
     try:
         while True:

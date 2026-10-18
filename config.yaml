@@ -242,11 +242,23 @@ garments:
 # ---------------- 3D sensor path (docs/BUILD_SPEC_3D.md) ----------------
 sensor:
   kind: webcam              # webcam | iphone  (--sensor overrides)
+  cam_size: [960, 720]      # camera space for the iphone path (4:3 like the phone: square pixels)
   port: 7777                # TCP port the phone app listens on
-  usbmux: true              # forward the port over USB with pymobiledevice3; false = connect to `host`
+  usbmux: true              # connect over USB (usbmuxd); false = connect to `host`
   host: 127.0.0.1
+  udid: null                # usbmux: pick this device (null = first USB iPhone)
   connect_timeout_s: 10
   stale_ms: 500
+  reconnect_s: 1.0
+  recv_timeout_s: 0.05
+  recv_bytes: 1048576
+  max_payload_mb: 64
+  ping_interval_s: 1.0
+  ping_window: 8
+  stats_window_s: 1.0
+  depth_interp: nearest     # nearest | linear (linear invents depths across edges)
+  min_visibility: null      # null = tracker.min_visibility
+  synth_head_frac: 0.5
 
 depthmask:
   background_frames: 60     # ~2 s at 30 fps of the empty scene
@@ -268,6 +280,8 @@ render3d:
   depth_gap_m: 0.12         # skip triangles across depth discontinuities larger than this
   fill_holes_px: 2          # tiny holes only, never across real gaps
   mesh_step: 1              # 1 = one vertex per depth pixel
+  distortion_radius_factor: 1.5
+  k_drift_warn_px: 5.0      # warn when live intrinsics differ from calibration3d by more than this
 
 calibration3d:
   file: calibration3d.yaml
@@ -278,6 +292,23 @@ calibration3d:
   min_depth_confidence: 2
   ransac_reproj_px: 3.0
   target_reproj_px: 1.5
+  min_depth_span_m: 0.35    # 5-95% depth span of the correspondences; below = target too planar, refuse
+  settle_frames: 10
+  depth_frames: 10
+  max_correspondences: 50000
+  max_calib_points: 4000
+  min_points: 500
+  solve_rounds: 2
+  ransac_iterations: 500
+  coarse_ransac_px: 25.0
+  ransac_confidence: 0.999
+  lm_max_iter: 200
+  fix_k3: true
+  zero_tangent_dist: true
+  seed: 0
+  verify_grid_m: 0.1
+  verify_edge_m: 0.1
+  verify_line_px: 3
 
 latency:                    # scripts/latency_probe.py
   period_s: 1.0             # white this long, then black this long

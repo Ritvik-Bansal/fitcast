@@ -538,6 +538,14 @@ def run_calibration3d(cfg: dict, cam_size: tuple[int, int], proj_size: tuple[int
     ok = np.isfinite(pts3d).all(axis=1)
     pts3d, pts2d = pts3d[ok], proj_xy[ys[ok], xs[ok]].astype(np.float64)
     log(f"solve: {len(pts3d)} correspondences (depth range {pts3d[:, 2].min():.2f}-{pts3d[:, 2].max():.2f} m)")
+    # degeneracy gate: a (nearly) planar target cannot constrain the projector intrinsics; require depth structure
+    z = pts3d[:, 2]
+    span = float(np.percentile(z, 95) - np.percentile(z, 5))
+    min_span = float(cfg.get("min_depth_span_m", 0.35))
+    if span < min_span:
+        raise RuntimeError(f"target is too planar: 5-95% depth span {span:.2f} m < {min_span} m. Put boxes/boards at "
+                           "clearly different distances in front of the wall (at least ~40 cm apart in depth) and rerun")
+    log(f"depth structure: 5-95% span {span:.2f} m (min {min_span})")
     K_p, dist_p, R, t, rms, inl = solve_projector(pts3d, pts2d, proj_size, float(cfg["throw_ratio_guess"]), cfg)
     log(f"reprojection error: {rms:.3f} px RMS over {inl.sum()} inliers (projector px; "
         f"target {cfg['target_reproj_px']} px), total {time.perf_counter() - t0:.1f} s")
