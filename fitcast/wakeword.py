@@ -220,7 +220,11 @@ class WakeListener(threading.Thread):
                     self.on_wake()
                 continue
             # listening: collect until a pause after speech, or the maximum length. The first `ack_mute_s` after
-            # the wake word are the booth's own chime / voice and never count as speech.
+            # the wake word are the booth's own chime / voice and never count as speech; neither does anything
+            # while the booth is speaking (`mute_until`).
+            if time.perf_counter() < self.mute_until:
+                t_start = max(t_start, time.perf_counter() - self.ack_mute_s)   # the clock restarts after the speech
+                continue
             buf.append(data)
             rec.AcceptWaveform(data)
             rms = float(np.sqrt(np.mean(np.frombuffer(data, np.int16).astype(np.float32) ** 2)))
