@@ -130,3 +130,9 @@ Each milestone: what was run, what was observed.
 - Tests: 117+ passing (`tests/test_selfcal.py` covers the two-plane rig and the split warp).
 - Open: second-distance T-pose (two-plane depth model) not yet exercised live; gesture reach threshold still generous;
   the dense scan cannot decode clipped white fabric (now excluded) so torso points come mostly from the disc pass + arms.
+- Garments: 10 new outfits (14-23) from real Wikimedia Commons photos (tees, madras shirt, overshirts, sweater, flared /
+  grey / baggy jeans, track pants, khaki trousers) + procedural hoodie, jersey, cargo, chinos, sweatpants.
+  `scripts/fetch_garments.py` (download + cut-out + write), `scripts/procedural_garments.py`; licences in
+  `assets/garments/SOURCES.md` (three photos are CC BY-SA: outfits 14, 15, 16, 21 - fine for the demo with attribution).
+- Mix-and-match: zone swipes (above the waist = top, below = bottoms), two wall strips (bottoms left, tops right),
+  swipes only while standing still and one-handed.

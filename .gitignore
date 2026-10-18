@@ -20,3 +20,9 @@ calibration.yaml
 assets/garments/
 ios/build/
 ios/*.xcodeproj/
+
+# keep the licence record of the real-photo garments even though the generated assets are ignored
+!assets/garments/SOURCES.md
+!assets/garments/_raw/
+assets/garments/_raw/*
+!assets/garments/_raw/sources.json
