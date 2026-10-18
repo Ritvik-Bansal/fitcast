@@ -61,6 +61,10 @@ class Smoother:
         self._frozen = np.zeros(33, np.int32)
         self.max_freeze = int(cfg.get("max_freeze_frames", 5))
         self.jump_floor_px = float(cfg.get("max_jump_px_floor", 24))
+        self.vis_hold_frames = int(cfg.get("vis_hold_frames", 0))
+        self.vis_hold_thr = float(cfg.get("vis_hold_threshold", 0.5))
+        self._vis_left = np.zeros(33, np.int32)
+        self._vis_val = np.zeros(33, np.float32)
         self.sw_ratio_min = float(cfg.get("sw_ratio_min", 0.55))
         self.sw_ratio_max = float(cfg.get("sw_ratio_max", 1.6))
         self._jump_lim = np.full(33, float(cfg.get("max_jump_sw_limbs", 0.9)), np.float32)
@@ -74,6 +78,7 @@ class Smoother:
         self._mask_acc = None
         self._prev_xy = None
         self._frozen[:] = 0
+        self._vis_left[:] = 0
 
     def set_predict_ms(self, ms: float) -> None:
         """Set the prediction horizon (call with the measured pipeline latency)."""
@@ -107,6 +112,17 @@ class Smoother:
             self._frozen[~bad] = 0
         xy = self.filt(track.joints[:, :2], track.timestamp)
         self._prev_xy = xy.copy()
+        # visibility hold: a joint that was confidently seen stays usable for `vis_hold_frames` after a dip, so the
+        # renderer never drops a garment part for a frame because a hip or ankle score flickered at the threshold
+        if self.vis_hold_frames > 0:
+            good = track.visibility >= self.vis_hold_thr
+            self._vis_left[good] = self.vis_hold_frames
+            self._vis_val[good] = track.visibility[good]
+            held = (~good) & (self._vis_left > 0)
+            if held.any():
+                track.visibility[held] = np.maximum(track.visibility[held], self._vis_val[held])
+            self._vis_left[~good] -= 1
+            np.maximum(self._vis_left, 0, out=self._vis_left)
         track.shoulder_width = float(np.hypot(*(xy[11] - xy[12])))     # sizing follows the gated, smoothed joints
         if self.predict_s > 0 and self.filt.velocity is not None:
             step = self.filt.velocity * self.predict_s

@@ -105,6 +105,8 @@ smoothing:
   max_jump_px_floor: 24     # the per-frame limit is never below this many pixels
   sw_ratio_min: 0.55        # shoulder width below this fraction of the reference in a frame = glitch (shoulders frozen) ...
   sw_ratio_max: 1.6         # ... same above this
+  vis_hold_frames: 10       # a joint seen above vis_hold_threshold stays usable this many frames after its score dips
+  vis_hold_threshold: 0.5
 
 renderer:
   torso_margin_frac: 0.12   # expand torso quad outward, fraction of shoulder width
