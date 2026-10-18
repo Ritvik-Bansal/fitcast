@@ -25,6 +25,7 @@ def load_cfg(**overrides: object) -> dict:
     path = Path(__file__).resolve().parents[1] / "config.yaml"
     cfg = dict(yaml.safe_load(path.read_text())["gestures"])
     cfg["zone_swipes"] = False          # direction tests check the bare event names; zones are tested separately
+    cfg["vertical_swipes"] = False      # the horizontal rig tests; vertical swipes are tested separately
     cfg.update(overrides)
     return cfg
 
@@ -239,3 +240,30 @@ def test_zone_swipes_tag_top_and_bottom():
                              ref_shoulder_width=100.0, person_mask=None, facing_ratio=1.0)
             events += g.update(tr)
         assert events and all(e.endswith(suffix) for e in events), (suffix, events)
+
+
+def test_vertical_swipes_per_hand():
+    """Right hand up -> prev_bottom, right hand down -> next_bottom, left hand down -> next_top."""
+    import yaml
+    from fitcast.gestures import GestureDetector
+    cfg = dict(yaml.safe_load(open("config.yaml"))["gestures"])
+    cfg["vertical_swipes"] = True
+    cases = ((16, -1, "prev_bottom"), (16, +1, "next_bottom"), (15, +1, "next_top"), (15, -1, "prev_top"))
+    for wrist, direction, expected in cases:
+        g = GestureDetector(cfg)
+        events = []
+        for i in range(12):
+            t = i / 30.0
+            j = np.zeros((33, 3), np.float32); v = np.ones(33, np.float32)
+            j[0] = (640, 200, 0)
+            j[11] = (690, 300, 0); j[12] = (590, 300, 0)
+            j[23] = (670, 410, 0); j[24] = (610, 410, 0)
+            j[25] = (670, 560, 0); j[26] = (610, 560, 0)
+            j[13] = (720, 360, 0); j[14] = (560, 360, 0)
+            j[15] = (720, 420, 0); j[16] = (560, 420, 0)              # both wrists at rest beside the hips
+            j[wrist, 1] = 400 + direction * i * 15                     # the active wrist travels 165 px (1.65 sw) in 0.37 s
+            tr = TrackResult(ok=True, joints=j, visibility=v, clothes_mask=np.zeros((720, 1280), np.uint8),
+                             head_box=(600, 100, 680, 220), facing="front", timestamp=t, shoulder_width=100.0,
+                             ref_shoulder_width=100.0, person_mask=None, facing_ratio=1.0)
+            events += g.update(tr)
+        assert events == [expected], (wrist, direction, events)

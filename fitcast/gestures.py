@@ -51,6 +51,10 @@ class GestureDetector:
         self.min_velocity_zone = float(cfg.get("min_velocity_sw_per_s_zone", 1.8))
         self._facing_warned = 0.0
         self.max_body_travel = float(cfg.get("max_body_travel_sw", 0.5))
+        self.vertical_swipes = bool(cfg.get("vertical_swipes", False))
+        self.hand_for_bottoms = str(cfg.get("hand_for_bottoms", "right"))
+        self.min_travel_v = float(cfg.get("min_travel_sw_vertical", 0.9))
+        self.min_velocity_v = float(cfg.get("min_velocity_sw_per_s_vertical", 1.8))
         self.other_hand_max_travel = float(cfg.get("other_hand_max_travel_sw", 0.5))
         self._body = deque()
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
@@ -124,9 +128,30 @@ class GestureDetector:
             buf.append((now, (wx - cx) / sw, (wy - cy) / sw))
             while buf[0][0] < now - self.window_s:
                 buf.popleft()
-            t0, nx0, _ = buf[0]
+            t0, nx0, ny0 = buf[0]
             dt = now - t0
             dx = buf[-1][1] - nx0
+            if self.vertical_swipes:
+                dy = buf[-1][2] - ny0
+                if len(buf) < self.min_samples or dt <= 0.0 or abs(dy) <= self.min_travel_v:
+                    continue
+                vel = abs(dy) / dt
+                if vel <= self.min_velocity_v:
+                    continue
+                if vel > self.max_velocity or abs(dy) > self.max_travel:
+                    buf.clear()
+                    continue
+                other = next(b for i2, _, b in self._wrists if i2 != idx)
+                if len(other) >= 2 and abs(other[-1][2] - other[0][2]) > self.other_hand_max_travel:
+                    buf.clear()                 # both arms moving = not a deliberate swipe
+                    continue
+                part = "bottom" if side == self.hand_for_bottoms else "top"
+                event = ("prev" if dy < 0 else "next") + "_" + part      # image y grows downwards: up = prev
+                self._cooldown_until = now + self.cooldown_s
+                self._clear()
+                if self.log_events:
+                    log.info("%s t=%.3f wrist=%s vertical travel=%.2fsw velocity=%.2fsw/s", event, now, side, dy, vel)
+                return [event]
             # zone first: swipes high up (above `zone_line_sw`, shoulder-width units from the shoulder centre,
             # negative = above) are for tops; everything lower is for bottoms, which may be subtler
             mean_ny = sum(b[2] for b in buf) / len(buf)

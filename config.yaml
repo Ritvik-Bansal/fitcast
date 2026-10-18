@@ -48,7 +48,7 @@ tracker:
     close_kernel_px: 5
     erode_px: 6
     temporal_alpha: 0.45    # EMA weight of the newest mask (1.0 = no smoothing)
-    mask_hold_frames: 10       # clothes pixels persist this many frames after a segmenter dropout (clipped to the capsule region)
+    mask_hold_frames: 15       # clothes pixels persist this many frames after a segmenter dropout (clipped to the capsule region)
     sil_margin_sw: 0.3         # silhouette mode: fabric may extend this many shoulder widths beyond the skeleton capsules
     forearm_skin_zone_frac: 0.6 # width (shoulder widths) of the forearm/hand zone where segmenter skin is trusted
     area_jump_fallback: 0.40   # fall back to skeleton when clothes area changes more than this fraction ...
@@ -84,7 +84,7 @@ tracker:
   max_shoulder_px: 320      # wider shoulders = someone at the lens, not in the beam: ignored
   facing:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
-    hold_frames: 6
+    hold_frames: 15         # frames a new facing must persist (0.5 s): brief landmark swaps never flip the texture
     ref_window_frames: 600  # frontal reference = max shoulder width over this many recent frames (~20 s): self-healing
     ref_percentile: 90        # frontal reference = this percentile of the window (not the max: outlier-proof)
     face_vis_back_threshold: 0.0   # weak "back" hint from face visibility: off (MediaPipe reports ~1.0 from behind; Vision confidences drop with distance)
@@ -148,10 +148,14 @@ gestures:
   min_velocity_sw_per_s: 2.5
   max_velocity_sw_per_s: 12   # faster than this is a landmark jump (turns, identity switches), not a swipe
   max_travel_sw: 2.6
-  cooldown_s: 1.0
+  cooldown_s: 1.2
   band_top_frac: -0.3       # wrist must stay between the top of the head (top) ...
   band_bottom_frac: 1.7     # ... and mid-thigh (bottom); fractions along head->hip span
-  zone_swipes: true         # swipe above the hips -> tops only, below -> bottoms only (mix and match)
+  vertical_swipes: true     # per-hand vertical swipes: right hand up/down scrolls bottoms, left hand scrolls tops
+  hand_for_bottoms: right   # the person's right hand
+  min_travel_sw_vertical: 0.9
+  min_velocity_sw_per_s_vertical: 1.8
+  zone_swipes: true         # fallback scheme when vertical_swipes is false: horizontal swipe above/below the waist
   zone_line_sw: -0.3        # zone split, shoulder widths above the hip line: chest/head = tops, waist/legs = bottoms
   min_travel_sw_zone: 0.9           # with zone swipes both zones accept subtler swipes ...
   max_body_travel_sw: 0.5           # shoulder centre may move at most this much within the window (no swipes while walking)
