@@ -438,7 +438,7 @@ selfcal:                    # self-service calibration (T-pose or key t): discs 
 stylist:                    # optional Gemini outfit picker (needs network + a key; the demo is offline without it)
   enabled: false            # or run with --stylist
   key_file: secrets/gemini.key   # gitignored; GEMINI_API_KEY in the environment wins
-  models: [gemini-3.8-flash, gemini-3.1-flash-lite, gemini-3.7-flash, gemini-3.5-flash]   # free-tier Flash models, tried in order on 404/429/503
+  models: [gemini-3.1-flash-lite, gemini-3.8-flash, gemini-3.7-flash, gemini-3.5-flash]   # fastest free model first; others on 404/429/503/timeout
   timeout_s: 25             # per model; a slow model falls through to the next one
   temperature: 0.4
   grounding: false          # google_search tool for live shop links (needs quota)
