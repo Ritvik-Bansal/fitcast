@@ -100,6 +100,7 @@ smoothing:
   max_jump_sw: 0.4          # shoulders/hips may move at most this many shoulder widths per frame (else frozen) ...
   max_jump_sw_limbs: 0.9    # ... limbs this much (a swipe is ~0.2 per frame)
   max_freeze_frames: 5      # after this many frozen frames the new position is accepted (real fast move)
+  max_jump_px_floor: 24     # the per-frame limit is never below this many pixels
 
 renderer:
   torso_margin_frac: 0.12   # expand torso quad outward, fraction of shoulder width
