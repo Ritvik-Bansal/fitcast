@@ -39,3 +39,4 @@
 - Live: tracking is restricted to the projector footprint (ROI from H) because bystanders near the lens hijacked the pose model and one refine run.
 - Live: `cv2.waitKey`/`CATransaction.flush` block ~10-12 ms per call on the main thread; the projector frame is committed from a worker thread and the event pump runs every 2nd frame.
 - Live: head box bottom is anchored to the chin (lowest face landmark + 0.30 SW) instead of the shoulder line; the neck/collar region is not the face and leaving it dark made every shirt look like it started too low.
+- iOS signing from the CLI: the project's original team (KQ3W39U2QQ, a teammate's account) cannot mint profiles on this Mac; the user's personal team 7JCAPWSS7Z can (`xcodebuild ... -allowProvisioningUpdates` succeeded). FitCastSensor target uses it with bundle id `com.aadit.fitcast.sensor`.
