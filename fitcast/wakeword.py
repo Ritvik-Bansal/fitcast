@@ -53,6 +53,24 @@ def strip_wake(text: str, variants: tuple[str, ...] | list[str] = _DEFAULT_VARIA
     return t[best:].strip() if best >= 0 else t
 
 
+_REQUEST_WORDS = {
+    "outfit", "outfits", "wear", "wearing", "dress", "look", "style", "fit", "fits", "clothes", "clothing",
+    "shirt", "tee", "t", "top", "tops", "hoodie", "hoody", "sweater", "sweatshirt", "crewneck", "jacket", "flannel",
+    "polo", "jersey", "fleece", "overshirt", "jeans", "pants", "trousers", "bottoms", "cargo", "cargos", "joggers",
+    "sweatpants", "chinos", "khakis", "track", "shorts", "denim", "baggy", "flared", "flare", "skinny", "wide",
+    "red", "blue", "black", "white", "green", "grey", "gray", "navy", "pink", "yellow", "orange", "purple", "brown",
+    "beige", "khaki", "light", "dark", "interview", "casual", "formal", "professional", "party", "gym", "school",
+    "stussy", "essentials", "nike", "carhartt", "lakers", "chrome", "hearts", "levis", "champion", "dickies",
+}
+
+
+def request_like(text: str, keywords: set[str] = _REQUEST_WORDS, min_hits: int = 2) -> bool:
+    """True when a transcript reads like a clothing request: at least `min_hits` clothing / colour / brand words."""
+    words = normalise(text).split()
+    hits = sum(1 for w in words if w in keywords)
+    return len(words) >= 3 and hits >= min_hits
+
+
 class WakeListener(threading.Thread):
     """Background thread. Callbacks run on this thread: hand the data to the main loop through a queue.
 
@@ -62,9 +80,15 @@ class WakeListener(threading.Thread):
     """
 
     def __init__(self, cfg: dict, on_wake: Callable[[], None], on_request: Callable[[Path, str], None],
-                 on_error: Callable[[str], None] | None = None, source: str | None = None) -> None:
+                 on_error: Callable[[str], None] | None = None, source: str | None = None,
+                 extra_keywords: set[str] | None = None) -> None:
         super().__init__(name="wakeword", daemon=True)
         self.cfg = cfg
+        self.auto_request = bool(cfg.get("auto_request", True))
+        self.keywords = set(_REQUEST_WORDS) | set(extra_keywords or ())
+        self.min_hits = int(cfg.get("request_min_hits", 2))
+        self._hist: deque[bytes] = deque(maxlen=int(float(cfg.get("history_s", 12)) / 0.1))
+        self._last_final = 0.0
         self.on_wake, self.on_request, self.on_error = on_wake, on_request, on_error or (lambda m: None)
         self.source = source                                   # None = microphone; path = decode a file (tests)
         self.variants = tuple(cfg.get("wake_words", list(_DEFAULT_VARIANTS)))
@@ -163,11 +187,23 @@ class WakeListener(threading.Thread):
                 log.info("mic level rms %.0f (%s)", beat_rms / max(beat_n, 1), self.state)
                 last_beat, beat_rms, beat_n = time.perf_counter(), 0.0, 0
             ring.append(data)
+            self._hist.append(data)
             if self.state == "idle":
-                if rec.AcceptWaveform(data):
+                final = rec.AcceptWaveform(data)
+                if final:
                     text = json.loads(rec.Result()).get("text", "")
                 else:
                     text = json.loads(rec.PartialResult()).get("partial", "")
+                if final and text and self.auto_request and not wake_in(text, self.variants) \
+                        and request_like(text, self.keywords, self.min_hits):
+                    # no wake word needed: the sentence itself is a clothing request -> send that utterance
+                    n = min(len(self._hist), int((time.perf_counter() - self._last_final) / 0.1) + 8)
+                    log.info("request heard without wake word: %r (%.1f s of audio)", text, n * 0.1)
+                    self._emit(list(self._hist)[-n:], rec, hint=text)
+                    self._last_final = time.perf_counter()
+                    continue
+                if final:
+                    self._last_final = time.perf_counter()
                 if text and (time.perf_counter() - getattr(self, "_last_text_log", 0.0) > 3.0 or "fit" in text or "fet" in text):
                     log.info("heard: %r", text[-60:])
                     self._last_text_log = time.perf_counter()
@@ -213,9 +249,10 @@ class WakeListener(threading.Thread):
             self.on_error(f"ffmpeg: {err[:160]}")
         self.state = "stopped"
 
-    def _emit(self, buf: list[bytes], rec) -> None:
-        hint = strip_wake(json.loads(rec.FinalResult()).get("text", ""), self.variants)
-        rec.Reset()
+    def _emit(self, buf: list[bytes], rec, hint: str | None = None) -> None:
+        if hint is None:
+            hint = strip_wake(json.loads(rec.FinalResult()).get("text", ""), self.variants)
+            rec.Reset()
         self.out_path.parent.mkdir(parents=True, exist_ok=True)
         with wave.open(str(self.out_path), "wb") as w:
             w.setnchannels(1)

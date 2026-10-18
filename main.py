@@ -218,9 +218,10 @@ class App:
                     vol = scfg.get("output_volume")
                     if vol is not None:
                         subprocess.Popen(["osascript", "-e", f"set volume output volume {int(vol)}"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    words = {w for o in outfits for w in o.name.lower().replace("+", " ").replace("'", "").split() if len(w) > 2}
                     self.wake = WakeListener(wcfg, on_wake=lambda: self._wake_events.put(("wake", None)),
                                              on_request=lambda path, hint: self._wake_events.put(("request", (path, hint))),
-                                             on_error=lambda msg: self._wake_events.put(("error", msg)))
+                                             on_error=lambda msg: self._wake_events.put(("error", msg)), extra_keywords=words)
                     self.wake.start()
                     log.info("wake word on: say %r and then your request", wcfg.get("wake_words", ["fitbot"])[0])
         if self.sensor_kind != "iphone":
@@ -674,6 +675,10 @@ class App:
                     self.compositor.set_message(["Didn't catch a request. Say Fitbot, then ask."], now, 5)
                 elif self.stylist.ask_audio(path, hint):
                     self.compositor.set_message([f"Heard: {hint[:60]}" if hint else "Heard you", "Stylist is thinking..."], now, 30)
+                    chime = scfg.get("wake", {}).get("chime", "/System/Library/Sounds/Glass.aiff")
+                    if chime:
+                        subprocess.Popen(["afplay", "-v", str(scfg.get("wake", {}).get("chime_volume", 4)), chime],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             elif kind == "error":
                 log.error("wake word listener: %s", payload)
                 self.compositor.set_message(["Voice trigger off", str(payload)[:60]], now, 8)

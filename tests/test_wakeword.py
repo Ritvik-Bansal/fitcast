@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fitcast.wakeword import WakeListener, strip_wake, wake_in
+from fitcast.wakeword import WakeListener, request_like, strip_wake, wake_in
 
 
 def test_wake_variants():
@@ -38,3 +38,10 @@ def test_listener_records_request_after_wake(tmp_path):
     path, hint = next(v for k, v in kinds if k == "request")
     assert Path(path).stat().st_size > 16000
     assert "hoodie" in hint or "casual" in hint
+
+
+def test_request_like_needs_clothing_words():
+    assert request_like("by be a red shirt with blue jeans")
+    assert request_like("get me a stussy hoodie with chrome hearts jeans")
+    assert not request_like("it's important")
+    assert not request_like("we should go get lunch now")

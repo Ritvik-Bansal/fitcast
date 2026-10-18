@@ -462,6 +462,9 @@ stylist:                    # optional Gemini outfit picker (needs network + a k
     say_on_wake: ""        # spoken acknowledgement (off: the booth's own voice was being recorded as the request)
     chime_volume: 4         # afplay gain for the wake chime
     max_restarts: 20
+    auto_request: true      # a sentence with >= request_min_hits clothing / colour / brand words is a request, no wake word needed
+    request_min_hits: 2
+    history_s: 12
     wake_words: [fitbot, fit bot, fit but, fitbit, fit bit, fat bit, fit bought, feet bot, fit pot]   # how the small model hears "Fitbot"
     silence_rms: 250        # int16 RMS below this = silence
     silence_s: 1.4          # pause that ends the request (people pause mid-sentence)
