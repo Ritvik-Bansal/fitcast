@@ -63,7 +63,8 @@ class Renderer:
         if tex is None:
             return
         c = self.cfg
-        min_w = c["side_min_width_frac"] * ref if facing == "side" else 0.0
+        # width floor from the frontal reference width: a one-frame landmark collapse never squeezes the torso
+        min_w = (c["side_min_width_frac"] if facing == "side" else float(c.get("front_min_width_frac", 0.0))) * ref
         raise_frac = float(c.get("neck_raise_back_frac", c["neck_raise_frac"])) if from_behind else c["neck_raise_frac"]
         dst = geo.torso_quad(j, sw, c["torso_margin_frac"], raise_frac, c["hem_drop_frac"], min_w)
         # dst is [image-left shoulder, image-right shoulder, image-right hem, image-left hem] which matches

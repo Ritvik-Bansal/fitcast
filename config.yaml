@@ -97,6 +97,9 @@ smoothing:
   predict_auto: true        # replace it with the measured capture->display latency (EMA, clamped)
   predict_max_ms: 40        # short horizon: velocity noise x horizon is what made garments jitter
   max_predict_px: 12
+  max_jump_sw: 0.4          # shoulders/hips may move at most this many shoulder widths per frame (else frozen) ...
+  max_jump_sw_limbs: 0.9    # ... limbs this much (a swipe is ~0.2 per frame)
+  max_freeze_frames: 5      # after this many frozen frames the new position is accepted (real fast move)
 
 renderer:
   torso_margin_frac: 0.12   # expand torso quad outward, fraction of shoulder width
@@ -111,6 +114,7 @@ renderer:
   shin_width_frac: 0.70
   waist_band_height_frac: 0.14
   side_min_width_frac: 0.85 # side view: torso quad is at least this wide (fraction of ref shoulder width); the mask clips it
+  front_min_width_frac: 0.7 # front/back: torso quad never narrower than this fraction of the reference shoulder width
   bottom_knee_frac: 0.55    # where the bottoms texture splits thigh / shin (fraction of its height)
   waist_min_half_width_frac: 0.45
   feather_px: 4
