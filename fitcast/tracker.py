@@ -18,7 +18,7 @@ from .types import (FACE_IDX, L_ANKLE, L_ELBOW, L_HIP, L_KNEE, L_SHOULDER, L_WRI
 
 log = logging.getLogger("fitcast.tracker")
 
-MASK_MODES = ("clothes", "skeleton", "intersect")
+MASK_MODES = ("clothes", "skeleton", "intersect", "silhouette")
 
 # COCO-17 (rtmlib) index -> MediaPipe-33 index
 COCO_TO_MP = {0: 0, 1: 2, 2: 5, 3: 7, 4: 8, 5: 11, 6: 12, 7: 13, 8: 14, 9: 15, 10: 16,
@@ -162,7 +162,7 @@ def compute_head_box(joints: np.ndarray, vis: np.ndarray, sw: float, cfg: dict, 
     # bottom: the chin plus a margin (mouth corners are the lowest face landmarks), never below the shoulder line.
     # Anchoring to the shoulders left the whole neck/collar dark and made every shirt look like it started too low.
     chin = fy1 + cfg["chin_margin_frac"] * sw
-    y1 = max(min(chin, sh_y - cfg["bottom_gap_frac"] * sw), fy1 + m_min)
+    y1 = max(min(chin, sh_y - cfg["bottom_gap_frac"] * sw), fy1 + cfg.get("bottom_min_margin_frac", cfg["min_margin_frac"]) * sw)
     # union with segmentation evidence above the shoulder line, near the face
     cx = 0.5 * (fx0 + fx1)
     win = cfg["search_window_frac"] * sw
@@ -439,6 +439,10 @@ class Tracker:
         self.hair_class = int(mcfg["hair_class"])
         self.face_class = int(mcfg["face_class"])
         self.skin_class = int(mcfg["body_skin_class"])
+        self.bg_class = int(mcfg.get("background_class", 0))
+        self.sil_margin_sw = float(mcfg.get("sil_margin_sw", 0.5))
+        self.fore_zone_frac = float(mcfg.get("forearm_skin_zone_frac", 0.6))
+        self._zone = np.zeros((self.H, self.W), np.uint8)
         self.side_width_floor = float(cfg["head"]["side_width_floor_frac"])
         self.torso_fill_hem_frac = float(mcfg["torso_fill_hem_frac"])
         self._n = 0
@@ -629,9 +633,45 @@ class Tracker:
             self.last_person_mask = None
 
         # clothes mask: class 4, gated, closed, eroded
-        np.equal(self._cat, self.clothes_class, out=self._clothes.view(bool))
-        self._clothes *= 255
-        cv2.bitwise_and(self._clothes, self._gate, dst=self._clothes)
+        if self.mask_mode == "silhouette":
+            # every non-background pixel that is not skin, face or hair: independent of the fabric colour and of
+            # whatever we project onto it (projected light never changes a person into background or skin)
+            np.not_equal(self._cat, self.bg_class, out=self._clothes.view(bool))
+            self._clothes *= 255
+            # skin counts only where bare skin is expected: forearms + hands and above the shoulder line (neck).
+            # The segmenter calls white short sleeves "skin" too often to trust it on the upper arms.
+            self._zone.fill(0)
+            sh_y = float(min(joints[L_SHOULDER, 1], joints[R_SHOULDER, 1]))
+            self._zone[: int(np.clip(sh_y, 0, self.H))] = 255
+            wz = 0.5 * self.fore_zone_frac * sw_for_size
+            for a, b in ((L_ELBOW, L_WRIST), (R_ELBOW, R_WRIST)):
+                if vis[a] >= self.min_vis and vis[b] >= self.min_vis:
+                    quad = geo.limb_quad(joints[a, :2], joints[b, :2], wz, wz)
+                    cv2.fillConvexPoly(self._zone, np.round(quad).astype(np.int32), 255)
+                    cv2.circle(self._zone, (int(joints[a, 0]), int(joints[a, 1])), int(wz), 255, -1)
+                    cv2.circle(self._zone, (int(joints[b, 0]), int(joints[b, 1])), int(wz * 1.6), 255, -1)   # hand
+            np.equal(self._cat, self.skin_class, out=self._tmp.view(bool))
+            self._tmp *= 255
+            cv2.bitwise_and(self._tmp, self._zone, dst=self._tmp)
+            np.equal(self._cat, self.face_class, out=self._tmp2.view(bool))
+            self._tmp2 *= 255
+            cv2.bitwise_or(self._tmp, self._tmp2, dst=self._tmp)
+            np.equal(self._cat, self.hair_class, out=self._tmp2.view(bool))
+            self._tmp2 *= 255
+            cv2.bitwise_or(self._tmp, self._tmp2, dst=self._tmp)
+            cv2.bitwise_not(self._tmp, dst=self._tmp)                       # _tmp = not (zoned skin | face | hair)
+            cv2.bitwise_and(self._clothes, self._tmp, dst=self._clothes)
+            # the skeleton capsules are the colour-proof core (grey pants on a white wall defeat every segmenter);
+            # the silhouette may widen them up to `sil_margin_sw` shoulder widths (baggy fabric), never further
+            k_sil = _ksize(int(self.sil_margin_sw * sw_for_size))
+            box_dilate(self._skel, k_sil, self._hairface, self._tmp2)
+            cv2.bitwise_and(self._clothes, self._hairface, dst=self._clothes)
+            cv2.bitwise_or(self._clothes, self._skel, dst=self._clothes)
+            cv2.bitwise_and(self._clothes, self._tmp, dst=self._clothes)   # capsules on bare arms: skin stays dark
+        else:
+            np.equal(self._cat, self.clothes_class, out=self._clothes.view(bool))
+            self._clothes *= 255
+            cv2.bitwise_and(self._clothes, self._gate, dst=self._clothes)
         box_dilate(self._clothes, self.k_close, self._tmp, self._tmp2)        # close = dilate ...
         box_erode(self._tmp, self.k_close, self._clothes, self._tmp2)         # ... then erode
         box_erode(self._clothes, self.k_erode, self._tmp, self._tmp2)
@@ -656,7 +696,7 @@ class Tracker:
         if mode == "intersect" and self.fallback_active:
             mode = "skeleton"
         mask = self._out[self._n & 1]          # alternate two output buffers: no per-frame allocation
-        if mode == "clothes":
+        if mode in ("clothes", "silhouette"):
             np.copyto(mask, self._clothes)
         elif mode == "skeleton":
             if person is not None:          # fallback stays inside the person's silhouette (never fatter than the body)
@@ -688,7 +728,11 @@ class Tracker:
             cv2.subtract(self._hold, 1, dst=self._hold)                 # saturating: floors at 0
             np.copyto(self._hold, self.hold_frames, where=mask.view(bool))
             cv2.threshold(self._hold, 0, 255, cv2.THRESH_BINARY, dst=mask)
-            if person is not None:
+            if self.mask_mode == "silhouette":
+                # clip to the (moving) capsule region, not to the pose person mask that fails on the same fabric
+                box_dilate(self._skel, _ksize(int(self.sil_margin_sw * sw_for_size)), self._tmp, self._tmp2)
+                cv2.bitwise_and(mask, self._tmp, dst=mask)
+            elif person is not None:
                 np.copyto(self._tmp, self._pf, casting="unsafe")
                 cv2.bitwise_and(mask, self._tmp, dst=mask)
 

@@ -39,7 +39,8 @@ tracker:
   min_visibility: 0.5       # landmark counts as visible above this ...
   frame_margin_px: 8        # ... and when inside the frame by this many px
   mask:
-    mode: intersect         # clothes | skeleton | intersect
+    mode: silhouette        # clothes | skeleton | intersect | silhouette (person minus skin/face/hair: colour-proof)
+    background_class: 0
     clothes_class: 4        # selfie_multiclass: 0 bg, 1 hair, 2 body-skin, 3 face-skin, 4 clothes, 5 others
     hair_class: 1
     body_skin_class: 2
@@ -47,7 +48,9 @@ tracker:
     close_kernel_px: 5
     erode_px: 6
     temporal_alpha: 0.45    # EMA weight of the newest mask (1.0 = no smoothing)
-    mask_hold_frames: 4        # clothes pixels persist this many frames after a segmenter dropout (clipped to the silhouette)
+    mask_hold_frames: 6        # clothes pixels persist this many frames after a segmenter dropout (clipped to the capsule region)
+    sil_margin_sw: 0.5         # silhouette mode: fabric may extend this many shoulder widths beyond the skeleton capsules
+    forearm_skin_zone_frac: 0.6 # width (shoulder widths) of the forearm/hand zone where segmenter skin is trusted
     area_jump_fallback: 0.40   # fall back to skeleton when clothes area changes more than this fraction ...
     area_jump_frames: 2        # ... for this many consecutive frames
     seg_crop_margin_frac: 0.25 # segmenter runs on the person's bbox grown by this fraction (2x mask resolution)
@@ -58,7 +61,7 @@ tracker:
     torso_fill_hem_frac: 0.5   # fill polygon hem drop as a fraction of skeleton.hem_drop_frac
     skeleton:               # widths as fractions of shoulder width
       torso_margin_frac: 0.15
-      neck_raise_frac: 0.05
+      neck_raise_frac: 0.30   # torso core reaches the neck base (white tee on a white wall: the segmenter cannot)
       hem_drop_frac: 0.15
       upper_arm_width_frac: 0.32
       forearm_width_frac: 0.26
@@ -67,13 +70,14 @@ tracker:
       min_torso_width_frac: 0.7   # side view: torso polygon is at least this wide (fraction of shoulder width)
       dilate_px: 16         # extra dilation when used as a gate in intersect mode
   head:
-    side_margin_frac: 0.35  # per side, fraction of shoulder width
+    side_margin_frac: 0.30  # per side, fraction of shoulder width
     top_margin_frac: 0.70   # above the topmost face landmark (covers caps and hair)
-    bottom_gap_frac: 0.08   # box bottom never lower than this far above the shoulder line ...
-    chin_margin_frac: 0.30  # ... and normally ends this far below the lowest face landmark (chin + margin)
+    bottom_gap_frac: 0.05   # box bottom never lower than this far above the shoulder line ...
+    chin_margin_frac: 0.15  # ... and normally ends this far below the lowest face landmark (chin + margin)
+    bottom_min_margin_frac: 0.12  # floor for the bottom margin below the lowest face landmark (sides/top keep min_margin_frac)
     min_margin_frac: 0.25   # spec minimum: never less than this around the face
     use_person_mask: true   # also union the pose person-mask pixels above the shoulders
-    search_window_frac: 0.75   # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
+    search_window_frac: 0.4    # half-width (fraction of shoulder width) around the face centre searched for person/hair pixels
     side_width_floor_frac: 0.7 # in side view size the box/skeleton from at least this fraction of the reference shoulder width
   max_shoulder_px: 320      # wider shoulders = someone at the lens, not in the beam: ignored
   facing:
@@ -173,6 +177,7 @@ calibration:
   depth_interp_min: -0.5    # two-plane model: clamp of the interpolation factor between the two self-calibrated planes
   depth_interp_max: 1.5
   ransac_reproj_px: 8.0     # RANSAC inlier threshold, projector px (~5 camera px)
+  seam_feather_px: 60       # projector rows blended between the upper- and lower-body warps at the hip line
   min_fill_ratio: 0.6       # marker blobs must fill >= this of their bounding box (a disc is 0.785)
   max_aspect: 2.0           # and be at most this elongated
   max_blob_area_px: 6000    # larger blobs are people / glare
@@ -360,10 +365,28 @@ selfcal:                    # self-service calibration (T-pose or key t): discs 
   settle_frames: 5          # frames to wait after a pattern change (camera latency)
   median_frames: 2          # frames per capture (per-pixel median)
   initial_settle_s: 1.0     # black before the first disc (auto exposure settles)
+  edge_band_px: 18          # silhouette band excluded from disc detection (body sway)
+  dense: true               # after the discs: Gray-code scan -> per-pixel map, body plane from thousands of points
+  dense_level: 170          # grey level of the Gray-code patterns (255 clips on white fabric)
+  dense_sat_level: 250      # camera pixels at/above this in the white capture are not decoded
+  dense_black_threshold: 12 # lit pixel: white - black capture difference above this
+  dense_white_threshold: 4  # unambiguous bit: |code - inverse| above this
+  dense_ransac_px: 8.0      # projector px: inlier gate for the final plane statistics
+  dense_coarse_px: 20.0     # projector px: coarse RANSAC gate (body = one tilted plane; keeps the torso in)
+  dense_max_points: 4000
+  dense_min_body_points: 300
+  dense_min_inlier_frac: 0.5
+  dense_head_pad_proj_px: 40   # extra black margin around the head in projector px during the scan and the mesh
+  split_model: true         # dense scan also fits upper/lower body planes (hip line); the warp blends them
+  split_min_points: 200
+  mesh_show_s: 3.0          # green dot mesh + outline on the body after calibration (visual check)
+  mesh_dot_radius_px: 5     # ~1.4 cm at a 2.6 m wide beam
+  mesh_spacing_px: 16       # camera px between mesh dots
+  mesh_outline_step_px: 12  # camera px between outline dots
   margin_frac: 0.08
   disc_radius_px: 28        # projector px
   disc_level: 190           # grey level of the discs (brief; the head region is excluded from detection and skipped once a mapping exists)
-  head_pad_px: 40           # camera px around the head box where discs are ignored / not projected
+  head_pad_px: 12           # camera px around the head box where discs are ignored / not projected
   change_frac: 0.25         # torso length change that counts as a second standing distance
   min_body_discs: 3
   debug_images: 6           # out/selfcal_disc_XX.jpg (lit | difference) for the first discs

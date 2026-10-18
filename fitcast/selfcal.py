@@ -208,3 +208,163 @@ def self_calibrate(cfg: dict, calib_cfg: dict, cal: Calibration, proj_size: tupl
     log_fn(f"self-calibration: {len(pts)} discs, {out['n_body']} on the body (rms {out['rms_body']}), "
            f"{out['n_wall']} on the wall (rms {out['rms_wall']}), {skipped} skipped near the head, torso {torso_px:.0f} px")
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# Dense scan: Gray code over the whole beam -> per-pixel camera->projector map on the body and the wall
+# ---------------------------------------------------------------------------------------------
+def _head_rect_proj(head_box, head_pad: float, H: np.ndarray, proj_size: tuple[int, int], pad_proj: float) -> tuple[int, int, int, int]:
+    """Padded head box mapped into projector pixels (bounding rect, clipped). Blacked out in every projected frame."""
+    x0, y0, x1, y1 = head_box
+    pts = np.array([[x0 - head_pad, y0 - head_pad], [x1 + head_pad, y0 - head_pad],
+                    [x1 + head_pad, y1 + head_pad], [x0 - head_pad, y1 + head_pad]], np.float64).reshape(-1, 1, 2)
+    p = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
+    pw, ph = proj_size
+    px0, py0 = int(max(0, np.floor(p[:, 0].min() - pad_proj))), int(max(0, np.floor(p[:, 1].min() - pad_proj)))
+    px1, py1 = int(min(pw, np.ceil(p[:, 0].max() + pad_proj))), int(min(ph, np.ceil(p[:, 1].max() + pad_proj)))
+    return px0, py0, px1, py1
+
+
+def dense_scan(cfg: dict, cal3d_cfg: dict, proj_size: tuple[int, int], capture_fn, show_fn, person_mask: np.ndarray,
+               head_box: tuple[int, int, int, int], H_guess: np.ndarray, log_fn=log.info,
+               split_y: float | None = None) -> dict:
+    """Gray-code scan (44 patterns + white + black, ~10 s): every lit camera pixel gets its projector pixel.
+    Body pixels (eroded person mask, head excluded) and wall pixels are fitted with RANSAC homographies.
+    The head region (through `H_guess`, the disc-pass body plane) is black in every pattern.
+
+    Returns {"H_body", "rms_body", "n_body", "inlier_frac_body", "res_med", "res_p95", "H_wall", "rms_wall", "n_wall",
+             "proj_xy", "valid", "body"}; H_* None when the fit failed."""
+    from .calib3d import gray_code_patterns, decode_gray_code
+    patterns, white, black = gray_code_patterns(proj_size)
+    settle, nmed = int(cfg.get("settle_frames", 5)), int(cfg.get("median_frames", 2))
+    head_pad = float(cfg["head_pad_px"])
+    hx0, hy0, hx1, hy1 = _head_rect_proj(head_box, head_pad, H_guess, proj_size, float(cfg.get("dense_head_pad_proj_px", 40)))
+
+    lvl = int(cfg.get("dense_level", 170))
+
+    def to_frame(g: np.ndarray) -> np.ndarray:
+        f = cv2.cvtColor((g.astype(np.uint16) * lvl // 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
+        if hx1 > hx0 and hy1 > hy0:
+            f[hy0:hy1, hx0:hx1] = 0          # SAFETY: never light the head, even during the scan
+        return f
+
+    caps = [capture_median(to_frame(pat), capture_fn, show_fn, settle, nmed) for pat in patterns]
+    wcap = capture_median(to_frame(white), capture_fn, show_fn, settle, nmed)
+    bcap = capture_median(to_frame(black), capture_fn, show_fn, settle, nmed)
+    show_fn(np.zeros((proj_size[1], proj_size[0], 3), np.uint8))
+    dcfg = dict(cal3d_cfg)
+    dcfg["gray_code_black_threshold"] = float(cfg.get("dense_black_threshold", 12))
+    dcfg["gray_code_white_threshold"] = float(cfg.get("dense_white_threshold", 4))
+    proj_xy, valid = decode_gray_code(caps, wcap, bcap, proj_size, dcfg)
+    wg = wcap if wcap.ndim == 2 else wcap.max(axis=2)
+    valid &= wg < int(cfg.get("dense_sat_level", 250))        # clipped pixels decode wrong bits (white fabric)
+
+    r = int(cfg.get("edge_band_px", 18))
+    k = np.ones((2 * r + 1, 2 * r + 1), np.uint8)
+    body = valid & (cv2.erode(person_mask, k) > 0)
+    x0 = max(0, int(head_box[0] - head_pad)); y0 = max(0, int(head_box[1] - head_pad))
+    x1 = min(person_mask.shape[1], int(head_box[2] + head_pad)); y1 = min(person_mask.shape[0], int(head_box[3] + head_pad))
+    body[y0:y1, x0:x1] = False
+    wall = valid & (cv2.dilate(person_mask, k) == 0)
+    thr = float(cfg.get("dense_ransac_px", 6.0))
+    max_pts = int(cfg.get("dense_max_points", 4000))
+
+    def fit(sel: np.ndarray):
+        ys, xs = np.nonzero(sel)
+        n = len(xs)
+        if n < 50:
+            return None, None, 0, 0.0, None
+        idx = np.linspace(0, n - 1, min(n, max_pts)).astype(int)
+        cam = np.stack([xs[idx], ys[idx]], 1).astype(np.float64)
+        proj = proj_xy[ys[idx], xs[idx]].astype(np.float64)
+        # coarse RANSAC (wide gate: the body is one tilted plane, chest forward of the shins) then least squares on
+        # the inliers so the whole body, not just its largest flat part, defines the plane
+        H, inl = cv2.findHomography(cam, proj, cv2.RANSAC, float(cfg.get("dense_coarse_px", 20.0)))
+        if H is None:
+            return None, None, 0, 0.0, None
+        keep = inl.ravel().astype(bool)
+        if keep.sum() >= 8:
+            H2, _ = cv2.findHomography(cam[keep], proj[keep], 0)
+            if H2 is not None:
+                H = H2
+        H = H / H[2, 2]
+        err0 = np.linalg.norm(cv2.perspectiveTransform(cam.reshape(-1, 1, 2), H).reshape(-1, 2) - proj, axis=1)
+        keep = err0 < thr
+        err = np.linalg.norm(cv2.perspectiveTransform(cam.reshape(-1, 1, 2), H).reshape(-1, 2) - proj, axis=1)
+        rms = float(np.sqrt(np.mean(err[keep] ** 2))) if keep.any() else float("inf")
+        return H, rms, int(keep.sum()), float(keep.mean()), err
+
+    H_body, rms_body, n_body, frac_body, err_body = fit(body)
+    H_wall, rms_wall, n_wall, frac_wall, _ = fit(wall)
+    # upper / lower body planes split at the hip line (camera y): the chest sits in front of the shins
+    H_up = H_lo = None
+    n_up = n_lo = 0
+    rms_up = rms_lo = None
+    if split_y is not None:
+        rows = np.arange(body.shape[0], dtype=np.float32)[:, None]
+        H_up, rms_up, n_up, _, _ = fit(body & (rows < float(split_y)))
+        H_lo, rms_lo, n_lo, _, _ = fit(body & (rows >= float(split_y)))
+        log_fn(f"dense scan: upper body plane {n_up} inliers (rms {None if rms_up is None else round(rms_up, 2)} px), "
+               f"lower body plane {n_lo} inliers (rms {None if rms_lo is None else round(rms_lo, 2)} px)")
+    res_med = res_p95 = None
+    if err_body is not None:
+        res_med, res_p95 = float(np.median(err_body)), float(np.percentile(err_body, 95))
+        # residual map of the body-plane model on every decoded body pixel (diagnostic image)
+        ys, xs = np.nonzero(body)
+        cam_all = np.stack([xs, ys], 1).astype(np.float64)
+        e_all = np.linalg.norm(cv2.perspectiveTransform(cam_all.reshape(-1, 1, 2), H_body).reshape(-1, 2)
+                               - proj_xy[ys, xs].astype(np.float64), axis=1)
+        img = np.zeros(person_mask.shape, np.float32)
+        img[ys, xs] = e_all
+        heat = cv2.applyColorMap(cv2.convertScaleAbs(img, alpha=255.0 / 20.0), cv2.COLORMAP_JET)
+        heat[~body] = 0
+        cv2.imwrite("out/selfcal_residual.png", heat)
+        np.savez_compressed("out/selfcal_dense.npz", proj_xy=proj_xy, valid=valid, body=body, person_mask=person_mask,
+                            head_box=np.array(head_box), H_body=H_body, H_guess=H_guess)
+        # upper vs lower body residual (split at the vertical middle of the body pixels): a large gap means the
+        # body is not one plane for this camera/projector baseline
+        ymid = 0.5 * (ys.min() + ys.max())
+        up, lo = e_all[ys < ymid], e_all[ys >= ymid]
+        if len(up) and len(lo):
+            log_fn(f"dense scan: residual median upper body {np.median(up):.1f} px, lower body {np.median(lo):.1f} px")
+    log_fn(f"dense scan: {int(valid.sum())} decoded px, body {int(body.sum())} px -> plane from {n_body} inliers "
+           f"(rms {rms_body if rms_body is None else round(rms_body, 2)} px, {frac_body:.0%} inliers, residual median "
+           f"{None if res_med is None else round(res_med, 1)} / p95 {None if res_p95 is None else round(res_p95, 1)} px); "
+           f"wall {n_wall} inliers (rms {rms_wall if rms_wall is None else round(rms_wall, 2)} px)")
+    return {"H_body": H_body, "rms_body": rms_body, "n_body": n_body, "inlier_frac_body": frac_body,
+            "res_med": res_med, "res_p95": res_p95, "H_wall": H_wall, "rms_wall": rms_wall, "n_wall": n_wall,
+            "H_upper": H_up, "n_upper": n_up, "rms_upper": rms_up, "H_lower": H_lo, "n_lower": n_lo, "rms_lower": rms_lo,
+            "proj_xy": proj_xy, "valid": valid, "body": body}
+
+
+def render_dot_mesh(proj_size: tuple[int, int], person_mask: np.ndarray, head_box: tuple[int, int, int, int],
+                    H: np.ndarray, cfg: dict) -> np.ndarray:
+    """Green dot mesh over the body plus a dot outline of the silhouette, mapped through `H`: shown for a few
+    seconds after calibration so the mapping can be checked by eye (the dots must sit on the body). Head black."""
+    pw, ph = proj_size
+    f = np.zeros((ph, pw, 3), np.uint8)
+    rad = int(cfg.get("mesh_dot_radius_px", 5))
+    sp = int(cfg.get("mesh_spacing_px", 24))
+    step = int(cfg.get("mesh_outline_step_px", 12))
+    head_pad = float(cfg["head_pad_px"])
+    inner = cv2.erode(person_mask, np.ones((7, 7), np.uint8))
+    ys, xs = np.mgrid[sp // 2:person_mask.shape[0]:sp, sp // 2:person_mask.shape[1]:sp]
+    on = inner[ys, xs] > 0
+    pts = [np.stack([xs[on], ys[on]], 1).astype(np.float64)]
+    cnts, _ = cv2.findContours(person_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    for c in cnts:
+        if len(c) >= step * 3:
+            pts.append(c[::step, 0, :].astype(np.float64))
+    cam = np.concatenate(pts, 0) if pts else np.zeros((0, 2))
+    x0, y0, x1, y1 = head_box
+    keep = ~((cam[:, 0] >= x0 - head_pad) & (cam[:, 0] <= x1 + head_pad) & (cam[:, 1] >= y0 - head_pad) & (cam[:, 1] <= y1 + head_pad))
+    cam = cam[keep]
+    if len(cam):
+        proj = cv2.perspectiveTransform(cam.reshape(-1, 1, 2), H).reshape(-1, 2)
+        for x, y in proj:
+            if 0 <= x < pw and 0 <= y < ph:
+                cv2.circle(f, (int(round(x)), int(round(y))), rad, (0, 255, 0), -1, cv2.LINE_AA)
+    hx0, hy0, hx1, hy1 = _head_rect_proj(head_box, head_pad, H, proj_size, float(cfg.get("dense_head_pad_proj_px", 40)))
+    if hx1 > hx0 and hy1 > hy0:
+        f[hy0:hy1, hx0:hx1] = 0              # SAFETY: last operation, head black
+    return f

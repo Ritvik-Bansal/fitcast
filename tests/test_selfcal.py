@@ -68,3 +68,25 @@ def test_two_plane_model_interpolates(config):
     assert abs(xb.mean() - xa.mean()) < 1.5 and abs(yb.mean() - ya.mean()) < 1.5   # second plane -> warp with H1
     assert cal.set_plane(H0, 105.0) == "primary"          # same distance -> replaces the primary (reference 105 now)
     assert cal.data.depth_ref_torso_px == 105.0 and cal.data.H2 is not None
+
+
+def test_split_warp_identity_and_shift():
+    """Identity part corrections reproduce the single warp; a translated upper correction shifts only the top."""
+    import yaml
+    from fitcast.calibration import Calibration, CalibrationData, make_sim_homography
+    cfg = yaml.safe_load(open("config.yaml"))["calibration"]
+    cam, proj = (1280, 720), (1920, 1080)
+    cal = Calibration(cfg, cam)
+    cal.data = CalibrationData(H=make_sim_homography(cam, proj), camera_size=cam, projector_size=proj, reproj_error_px=1.0,
+                               timestamp="t", gallery_rect=None, verified=True, verify_max_err_px=None)
+    rng = np.random.default_rng(0)
+    img = rng.integers(0, 255, (720, 1280, 3), np.uint8)
+    single = cal.to_projector(img).copy()
+    cal.data.D_upper, cal.data.D_lower = np.eye(3), np.eye(3)
+    split = cal.to_projector(img, split_y=360.0).copy()
+    assert np.array_equal(single, split)
+    cal.data.D_upper = np.array([[1, 0, 0], [0, 1, -40.0], [0, 0, 1]])      # upper body 40 projector px up
+    moved = cal.to_projector(img, split_y=360.0).copy()
+    # warpPerspective computes its maps in fixed point per block, so a shifted warp is equal only up to rounding
+    assert np.abs(moved[100:200].astype(int) - single[140:240].astype(int)).mean() < 2.0   # top rows: shifted copy
+    assert np.array_equal(moved[900:1000], single[900:1000])                                 # bottom rows: untouched

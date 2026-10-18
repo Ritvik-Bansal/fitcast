@@ -64,6 +64,8 @@ class CalibrationData:
     depth_slope: list[float] | None = None    # camera-px shift per px of torso length away from that spot (dx, dy)
     H2: np.ndarray | None = None              # second camera->projector homography at another standing distance ...
     depth_ref2_torso_px: float | None = None  # ... with the torso length (px) measured there (self-calibration)
+    D_upper: np.ndarray | None = None         # projector-space correction for the upper body (above the hips) ...
+    D_lower: np.ndarray | None = None         # ... and the lower body: H_part = D_part @ H  (dense self-calibration)
 
 
 def _size(s) -> tuple[int, int]:
@@ -99,7 +101,7 @@ def _rescale_data(d: CalibrationData, new_size: tuple[int, int]) -> CalibrationD
                                verify_max_err_px=verr, simulated=d.simulated,
                                depth_ref_torso_px=None if d.depth_ref_torso_px is None else d.depth_ref_torso_px * (sx + sy) / 2,
                                depth_slope=d.depth_slope, H2=None if d.H2 is None else (lambda M: M / M[2, 2])(d.H2 @ np.linalg.inv(_resize_matrix(d.camera_size, new_size))),
-                               depth_ref2_torso_px=None if d.depth_ref2_torso_px is None else d.depth_ref2_torso_px * (sx + sy) / 2)
+                               depth_ref2_torso_px=None if d.depth_ref2_torso_px is None else d.depth_ref2_torso_px * (sx + sy) / 2, D_upper=d.D_upper, D_lower=d.D_lower)
 
 
 def _data_from_dict(raw) -> CalibrationData:
@@ -129,6 +131,8 @@ def _data_from_dict(raw) -> CalibrationData:
         depth_slope=None if raw.get("depth_slope") is None else [float(v) for v in raw["depth_slope"]],
         H2=None if raw.get("H2") is None else np.asarray(raw["H2"], np.float64),
         depth_ref2_torso_px=None if raw.get("depth_ref2_torso_px") is None else float(raw["depth_ref2_torso_px"]),
+        D_upper=None if raw.get("D_upper") is None else np.asarray(raw["D_upper"], np.float64),
+        D_lower=None if raw.get("D_lower") is None else np.asarray(raw["D_lower"], np.float64),
     )
 
 
@@ -143,6 +147,7 @@ class Calibration:
         self.data: CalibrationData | None = None
         self._H_inv: np.ndarray | None = None
         self._buf: np.ndarray | None = None
+        self._buf2 = None
         self._letterbox_cache: tuple[tuple[int, int], np.ndarray] | None = None
         self._warned_fallback = False
 
@@ -222,6 +227,8 @@ class Calibration:
             "depth_slope": None if d.depth_slope is None else [float(v) for v in d.depth_slope],
             "H2": None if d.H2 is None else [[float(v) for v in row] for row in d.H2],
             "depth_ref2_torso_px": None if d.depth_ref2_torso_px is None else float(d.depth_ref2_torso_px),
+            "D_upper": None if d.D_upper is None else [[float(v) for v in row] for row in d.D_upper],
+            "D_lower": None if d.D_lower is None else [[float(v) for v in row] for row in d.D_lower],
         }
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text("# FitCast calibration: H maps camera px -> projector px. "
@@ -278,7 +285,7 @@ class Calibration:
         return "second"
 
     def to_projector(self, img_cam: np.ndarray, shift: tuple[float, float] | None = None,
-                     torso_px: float | None = None) -> np.ndarray:
+                     torso_px: float | None = None, split_y: float | None = None) -> np.ndarray:
         """Warp a camera-space image into the (ph, pw) projector frame. `shift` = (dx, dy) camera px the light
         would land away from the intended spot at the person's current depth (see `depth_shift`); it is
         compensated by pre-translating the image.
@@ -295,6 +302,8 @@ class Calibration:
             M = self.H_for(torso_px) if torso_px is not None else self.data.H
             if shift is not None and (shift[0] or shift[1]):
                 M = M @ np.array([[1.0, 0.0, -shift[0]], [0.0, 1.0, -shift[1]], [0.0, 0.0, 1.0]])
+            if split_y is not None and self.data.D_upper is not None and self.data.D_lower is not None:
+                return self._warp_split(img_cam, M, float(split_y))
         else:
             if not self._warned_fallback:
                 logger.warning("No calibration: projecting a letterboxed camera image. Fix: %s.", _FIX)
@@ -306,6 +315,36 @@ class Calibration:
         return cv2.warpPerspective(img_cam, M, self.projector_size, dst=self._buf,
                                    flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
                                    borderValue=0)
+
+    def _warp_split(self, img_cam: np.ndarray, M: np.ndarray, split_y: float) -> np.ndarray:
+        """Upper body through D_upper @ M, lower body through D_lower @ M, feathered across the hip line
+        (`split_y`, camera px) over `seam_feather_px` projector rows. Chest and shins are not one plane when the
+        camera sits well away from the projector lens; the dense scan measures both."""
+        pw, ph = self.projector_size
+        d = self.data
+        Mu, Ml = d.D_upper @ M, d.D_lower @ M
+        shape = (ph, pw) + img_cam.shape[2:]
+        if self._buf is None or self._buf.shape != shape or self._buf.dtype != img_cam.dtype:
+            self._buf = np.zeros(shape, img_cam.dtype)
+        if self._buf2 is None or self._buf2.shape != shape or self._buf2.dtype != img_cam.dtype:
+            self._buf2 = np.zeros(shape, img_cam.dtype)
+        cv2.warpPerspective(img_cam, Mu, (pw, ph), dst=self._buf, flags=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        cv2.warpPerspective(img_cam, Ml, (pw, ph), dst=self._buf2, flags=cv2.INTER_LINEAR,
+                            borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+        xc = np.array([[[self.camera_size[0] / 2.0, split_y]]], np.float64)
+        ys = 0.5 * (cv2.perspectiveTransform(xc, Mu)[0, 0, 1] + cv2.perspectiveTransform(xc, Ml)[0, 0, 1])
+        f = int(self.cfg.get("seam_feather_px", 60))
+        y0 = int(np.clip(round(ys - f / 2), 0, ph))
+        y1 = int(np.clip(round(ys + f / 2), 0, ph))
+        out = self._buf
+        if y1 < ph:
+            out[y1:] = self._buf2[y1:]
+        if y1 > y0:
+            w = np.linspace(0.0, 1.0, y1 - y0, dtype=np.float32).reshape(-1, 1, *([1] * (out.ndim - 2)))
+            band = out[y0:y1] * (1.0 - w) + self._buf2[y0:y1] * w      # ponytail: a ~60-row slab; fine per frame
+            out[y0:y1] = np.rint(band).astype(out.dtype)
+        return out
 
     def set_homography(self, cam_pts: np.ndarray, proj_pts: np.ndarray) -> float:
         """Solve H from point pairs (RANSAC when > 4, exact when 4), store it, and return the

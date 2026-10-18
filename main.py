@@ -416,7 +416,55 @@ class App:
             return
         if res["n_body"] < int(scfg["min_body_discs"]):
             log.warning("self-calibration: only %d body discs; mapping comes mostly from the wall (depth correction weak)", res["n_body"])
+        if scfg.get("dense", True):
+            from fitcast.selfcal import dense_scan
+            log.info("self-calibration: dense Gray-code scan (46 patterns, ~%d s): keep holding still",
+                     46 * (int(scfg.get("settle_frames", 5)) + int(scfg.get("median_frames", 2))) // 30 + 1)
+            try:
+                hips_ok = track.visibility[23] >= self.tracker.min_vis and track.visibility[24] >= self.tracker.min_vis
+                split_y = float(0.5 * (track.joints[23, 1] + track.joints[24, 1])) if hips_ok else None
+                dres = dense_scan(scfg, self.cfg["calibration3d"], proj_size, capture_fn, show_fn, person, track.head_box,
+                                  res["H_body"], log_fn=log.info, split_y=split_y)
+            except RuntimeError as e:
+                log.error("dense scan failed: %s (keeping the disc mapping)", e)
+                dres = None
+            if (dres is not None and dres["H_body"] is not None and dres["n_body"] >= int(scfg.get("dense_min_body_points", 300))
+                    and dres["inlier_frac_body"] >= float(scfg.get("dense_min_inlier_frac", 0.5))):
+                res["H_body"], res["rms_body"], res["n_body"] = dres["H_body"], dres["rms_body"], dres["n_body"]
+                log.info("self-calibration: dense body plane (%d points, rms %.2f px, residual median %.1f / p95 %.1f px) "
+                         "replaces the disc solution; residual map out/selfcal_residual.png", dres["n_body"], dres["rms_body"],
+                         dres["res_med"], dres["res_p95"])
+                nmin = int(scfg.get("split_min_points", 200))
+                if (scfg.get("split_model", True) and dres["H_upper"] is not None and dres["H_lower"] is not None
+                        and dres["n_upper"] >= nmin and dres["n_lower"] >= nmin):
+                    inv = np.linalg.inv(dres["H_body"])
+                    Du, Dl = dres["H_upper"] @ inv, dres["H_lower"] @ inv
+                    self._pending_D = (Du / Du[2, 2], Dl / Dl[2, 2])
+                    c = cv2.perspectiveTransform(np.array([[[self.size[0] / 2.0, float(split_y or self.size[1] / 2)]]], np.float64), dres["H_body"])[0, 0]
+                    cu = cv2.perspectiveTransform(c.reshape(1, 1, 2), self._pending_D[0])[0, 0]
+                    cl = cv2.perspectiveTransform(c.reshape(1, 1, 2), self._pending_D[1])[0, 0]
+                    log.info("self-calibration: split model on (upper %d / lower %d points); at the hip line the two planes "
+                             "differ by (%.0f, %.0f) projector px", dres["n_upper"], dres["n_lower"], cu[0] - cl[0], cu[1] - cl[1])
+                else:
+                    self._pending_D = (None, None)
+            elif dres is not None:
+                log.warning("self-calibration: dense scan rejected (%d body points, %.0f%% inliers); keeping the disc mapping",
+                            dres["n_body"], 100 * dres["inlier_frac_body"])
+        if float(scfg.get("mesh_show_s", 3.0)) > 0:
+            from fitcast.selfcal import render_dot_mesh
+            try:
+                mesh = render_dot_mesh(proj_size, person, track.head_box, res["H_body"], scfg)
+                cv2.imwrite("out/selfcal_mesh.png", mesh)
+                show_fn(mesh)
+                t_end = time.perf_counter() + float(scfg.get("mesh_show_s", 3.0))
+                while time.perf_counter() < t_end:
+                    capture_fn()
+            except RuntimeError:
+                pass
         which = self.calib.set_plane(res["H_body"], torso_px, float(scfg["change_frac"]))
+        if getattr(self, "_pending_D", None) is not None:
+            self.calib.data.D_upper, self.calib.data.D_lower = self._pending_D
+            self._pending_D = None
         self.calib.data.reproj_error_px = float(res["rms_body"] if res["rms_body"] is not None else 0.0)
         self.calib.data.verified = True
         self.calib.data.timestamp = time.strftime("%Y-%m-%dT%H:%M:%S") + f" selfcal({which})"
@@ -453,6 +501,16 @@ class App:
         else:
             track = self.tracker.process(frame, ts)
         track = self.smoother.update(track)
+        if self.frames % int(self.cfg["logging"].get("debug_jpeg_every_frames", 45)) == 0 and track.ok:
+            dbg = frame.copy()
+            if track.clothes_mask is not None:
+                dbg[track.clothes_mask > 0] = (0.55 * dbg[track.clothes_mask > 0] + np.array([0, 112, 0])).astype(np.uint8)
+            x0, y0, x1, y1 = track.head_box
+            cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 0, 255), 2)
+            for a, b in ((11, 12), (11, 13), (13, 15), (12, 14), (14, 16), (11, 23), (12, 24), (23, 24), (23, 25), (25, 27), (24, 26), (26, 28)):
+                if track.visibility[a] >= self.tracker.min_vis and track.visibility[b] >= self.tracker.min_vis:
+                    cv2.line(dbg, tuple(int(v) for v in track.joints[a, :2]), tuple(int(v) for v in track.joints[b, :2]), (0, 255, 255), 2)
+            cv2.imwrite("out/live_debug.jpg", dbg, [cv2.IMWRITE_JPEG_QUALITY, 80])
         if self.frames % int(self.cfg["logging"].get("status_every_frames", 150)) == 0:
             log.info("status: %s facing %s sw %.0f px fps %.1f calib %s", "TRACKED" if track.ok else "no person",
                      track.facing if track.ok else "-", track.shoulder_width, self.fps,
@@ -514,7 +572,10 @@ class App:
                 # tracking lost: fade exactly what was last projected (projector space); never the 2D mapping
                 proj = cv2.convertScaleAbs(self._proj_cache, alpha=self.compositor.fade, beta=0)
         else:
-            proj = self.calib.to_projector(comp, shift, torso_px=self._torso_ema)
+            split_y = None
+            if track.ok and track.visibility[23] >= self.tracker.min_vis and track.visibility[24] >= self.tracker.min_vis:
+                split_y = float(0.5 * (track.joints[23, 1] + track.joints[24, 1]))
+            proj = self.calib.to_projector(comp, shift, torso_px=self._torso_ema, split_y=split_y)
         t2 = time.perf_counter()
         self.render_ms = (t2 - t1) * 1e3
         self.display.show_projector(proj)
