@@ -253,12 +253,15 @@ depthmask:
   closer_than_background_m: 0.08
   box_m: [-1.0, 1.0, -1.5, 1.2, 1.5, 5.0]   # x0 x1 y0 y1 z0 z1 metres around the mark (OpenCV camera coords)
   min_confidence: 1         # ARKit depth confidence 0 low, 1 medium, 2 high
-  open_px: 3
-  close_px: 7
+  open_px: 1                # radius in depth px (wrists are ~7 depth px wide at 3 m; radius 3 erased them)
+  close_px: 3               # radius in depth px (7 bridged the arm-torso gap)
+  min_component_frac: 0.002 # drop depth blobs smaller than this fraction of the depth image
   guided_radius_px: 8       # edge-aware upsampling of the low-res depth mask with the RGB image
-  guided_eps: 0.001
+  guided_eps: 0.001         # in 0..1 intensity units
+  guided_scale: 0.5         # OpenCV fast guided filter (2x faster, same IoU on synthetic tests)
   fuse_person_seg: true
   fuse_skeleton: true
+  fuse_reach_px: 12         # RGB segmentation / skeleton may extend the depth mask only this far (camera px)
 
 render3d:
   backend: moderngl
