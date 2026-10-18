@@ -394,6 +394,7 @@ class _Live:
         self.dm = DepthBodyMask(config["depthmask"], self.cam, self.cam)
         self.display = Display(config["display"], self.proj, (args.projector_x, args.projector_y))
         self.last_seq = -1
+        self._warned_k = False
 
     # -- io ----------------------------------------------------------------------------------
     def show(self, img: np.ndarray) -> None:
@@ -492,7 +493,10 @@ class _Live:
                 break
             frame, ts, st, conf, seg = f
             mask = self.mask_of(frame, st, conf, seg)
-            if lit_streak > self.settle and mask is not None:
+            if lit_streak > self.settle and mask is not None and st.K_cam is None and not self._warned_k:
+                print("WARNING: sensor frames carry no K (intrinsics): cannot convert to mm, frames not evaluated")
+                self._warned_k = True
+            if lit_streak > self.settle and mask is not None and st.K_cam is not None:
                 e, lit_pts, truth_pts = evaluate(frame, dark, mask, st.depth, st.K_cam, self.dcfg)
                 errs.append(e)
                 n_eval += 1

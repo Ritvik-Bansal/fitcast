@@ -291,3 +291,21 @@ latency:                    # scripts/latency_probe.py
   loop_timeout_s: 2.0
   poll_s: 0.001
   out_dir: out
+
+accuracy:                   # scripts/accuracy_check.py (BUILD_SPEC_3D section 10)
+  outline_thickness_px: 2
+  outline_color: [255, 255, 255]
+  dark_every_n: 10          # re-capture a dark reference every N evaluated frames (use 2 for the turn phase if motion contaminates)
+  seconds: 10
+  max_search_px: 50
+  min_blob_px: 8
+  annotate_frames: 3
+  frame_timeout_s: 5.0
+  out_dir: out
+  sim_person_offset_m: 0.8
+  sim_frames: 4
+  sim_shift_px: 15
+  sim_frames_per_pattern: 1
+  sim_max_median_mm: 3.0
+  sim_shift_min_ratio: 3.0
+  sim_shift_min_frac: 0.4
