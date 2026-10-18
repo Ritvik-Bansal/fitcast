@@ -237,6 +237,11 @@ echo "AIza..." > secrets/gemini.key            # or export GEMINI_API_KEY=...
 # or: echo "black jacket and blue jeans" > out/ask.txt
 .venv/bin/python scripts/stylist_cli.py "casual plaid shirt look"      # test without camera / projector
 ```
-Settings live under `stylist:` in `config.yaml` (models, microphone device, speech, message time). The demo itself stays
-offline; only this feature talks to the network. Shopping prices are model estimates unless `grounding: true` and the
-key has Google Search quota.
+Hands-free: with `stylist.wake.enabled` (default) an offline recogniser (Vosk, `assets/models/vosk-model-small-en-us-0.15`,
+`uv pip install --python .venv/bin/python vosk`) listens on the laptop microphone; say **"Fitbot"**, wait for the chime,
+then ask. The request audio goes to Gemini (free-tier Flash model), the answer dresses the person, is spoken aloud and
+appears in the band at the top of the beam together with a QR code of the first shop link. Links come from the curated
+table `assets/shop_links.yaml` (one or two verified retailer pages per garment); the model may add one more. Every answer's
+links are written to `out/last_links.txt`; set `stylist.imessage_to` to a phone number / Apple ID and they are also sent
+with Messages.app. Settings live under `stylist:` in `config.yaml`. The demo itself stays offline; only this feature
+talks to the network.

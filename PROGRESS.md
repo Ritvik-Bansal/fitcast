@@ -142,3 +142,8 @@ Each milestone: what was run, what was observed.
   the message band at the top of the beam. Verified: typed question 5-7 s, spoken question (synthesized speech) 7 s,
   end-to-end on the test clip. Model `gemini-3.8-flash` (2.5 models closed to new keys); search grounding is over
   quota on the free key, so prices are the model's estimates ("Prices approximate" on the wall).
+- Stylist v2 (2026-10-18): wake word "Fitbot" via offline Vosk (fitcast/wakeword.py, ffmpeg mic pipe, VAD end of
+  utterance), request audio + rough transcript to Gemini (gemini-3.8-flash, free tier; flash-lite fallback), curated
+  verified shop links per garment (assets/shop_links.yaml) merged first into every answer, QR of the first link on the
+  wall, links saved to out/last_links.txt and optionally sent by iMessage. Verified end to end from a synthesized
+  "Fitbot, find me a casual outfit with a hoodie and sweatpants" recording (wake heard, 3.5 s request, answer in 8.5 s).

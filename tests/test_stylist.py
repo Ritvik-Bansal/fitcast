@@ -19,13 +19,14 @@ def _outfit(i, name, bottom=True):
 
 def test_catalog_and_parse():
     outs = [_outfit(0, "Red Tee + Jeans"), _outfit(1, "Blue Shirt + Jeans"), _outfit(2, "Hoodie + Chinos")]
-    st = GeminiStylist({"models": ["x"]}, outs, "key")
+    st = GeminiStylist({"models": ["x"], "links_file": "assets/shop_links.yaml"}, outs, "key")
     cat = st.catalog()
     assert "T0: Red Tee" in cat and "T2: Hoodie" in cat
     assert "B0: Jeans" in cat and "B1: Chinos" in cat and "B2" not in cat          # distinct bottoms only
     r = st.parse('```json\n{"heard": "interview", "top_id": "T1", "bottom_id": "B1", "say": "ok", '
                  '"shopping": [{"item": "Oxford shirt", "store": "Uniqlo", "price_usd": 29.9, "url": "u"}]}\n```', "q")
-    assert (r.top_index, r.bottom_index) == (1, 2) and r.question == "interview" and r.shopping[0]["store"] == "Uniqlo"
+    assert (r.top_index, r.bottom_index) == (1, 2) and r.question == "interview"
+    assert r.shopping[0]["url"].startswith("http") and any(x["store"] == "Uniqlo" for x in r.shopping)   # curated first, model extra kept
     r2 = st.parse('{"top_id": "T9", "bottom_id": null, "say": "", "shopping": []}', "q")
     assert r2.top_index is None and r2.bottom_index is None
 

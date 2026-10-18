@@ -1,0 +1,109 @@
+# Where to buy pieces similar to the catalogue garments. Keys match the top / bottom names shown in the gallery.
+# Only retailers whose search pages answered a plain HTTP fetch are listed (Uniqlo, Levi's, J.Crew, adidas and
+# Carhartt block scripted checks). Prices are approximate 2026 list prices.
+Oversized White Tee:
+- store: Amazon
+  item: Hanes Beefy-T oversized white tee
+  price_usd: 12.0
+  url: https://www.amazon.com/s?k=oversized+white+t-shirt+men
+Flared Jeans:
+- store: Amazon
+  item: Wrangler flare jeans
+  price_usd: 40.0
+  url: https://www.amazon.com/s?k=flare+jeans+men
+Green Tee:
+- store: Amazon
+  item: Gildan heavy cotton tee, military green
+  price_usd: 9.0
+  url: https://www.amazon.com/s?k=green+t-shirt+men
+Navy Track Pants:
+- store: Amazon
+  item: Champion track pants, navy
+  price_usd: 30.0
+  url: https://www.amazon.com/s?k=navy+track+pants+men
+- store: Nike
+  item: Nike track pants
+  price_usd: 60.0
+  url: https://www.nike.com/w?q=track%20pants
+Madras Plaid Shirt:
+- store: Amazon
+  item: Short sleeve madras plaid shirt
+  price_usd: 28.0
+  url: https://www.amazon.com/s?k=madras+plaid+short+sleeve+shirt+men
+Grey Jeans:
+- store: Amazon
+  item: Lee regular fit jeans, grey
+  price_usd: 35.0
+  url: https://www.amazon.com/s?k=grey+jeans+men
+Olive Overshirt:
+- store: Amazon
+  item: Carhartt Rugged Flex shirt jacket, olive
+  price_usd: 60.0
+  url: https://www.amazon.com/s?k=olive+overshirt+men
+Cargo Pants:
+- store: Amazon
+  item: Wrangler ATG cargo pants
+  price_usd: 35.0
+  url: https://www.amazon.com/s?k=cargo+pants+men
+Crewneck Sweater:
+- store: Amazon
+  item: Amazon Essentials crewneck sweater
+  price_usd: 25.0
+  url: https://www.amazon.com/s?k=crewneck+sweater+men
+Khaki Trousers:
+- store: Amazon
+  item: Amazon Essentials classic-fit khaki
+  price_usd: 26.0
+  url: https://www.amazon.com/s?k=khaki+trousers+men
+Heather Hoodie:
+- store: Champion
+  item: Champion Reverse Weave hoodie, oxford grey
+  price_usd: 65.0
+  url: https://www.champion.com/search?q=reverse%20weave%20hoodie
+- store: Amazon
+  item: Hanes EcoSmart hoodie, heather grey
+  price_usd: 20.0
+  url: https://www.amazon.com/s?k=grey+hoodie+men
+Sweatpants:
+- store: Champion
+  item: Champion Powerblend sweatpants
+  price_usd: 40.0
+  url: https://www.champion.com/search?q=sweatpants
+- store: Amazon
+  item: Hanes EcoSmart sweatpants
+  price_usd: 15.0
+  url: https://www.amazon.com/s?k=grey+sweatpants+men
+Basketball Jersey:
+- store: Nike
+  item: Nike Dri-FIT basketball jersey
+  price_usd: 45.0
+  url: https://www.nike.com/w?q=basketball%20jersey
+- store: Amazon
+  item: Blank mesh basketball jersey
+  price_usd: 20.0
+  url: https://www.amazon.com/s?k=basketball+jersey+men
+Baggy Jeans:
+- store: Amazon
+  item: Wrangler loose fit jeans
+  price_usd: 35.0
+  url: https://www.amazon.com/s?k=baggy+jeans+men
+Grey Overshirt:
+- store: Amazon
+  item: Dickies long sleeve work shirt, grey
+  price_usd: 30.0
+  url: https://www.amazon.com/s?k=grey+overshirt+men
+Chinos:
+- store: Amazon
+  item: Amazon Essentials slim-fit chino
+  price_usd: 25.0
+  url: https://www.amazon.com/s?k=chinos+men
+Jeans:
+- store: Amazon
+  item: Levi's 505 regular fit jeans
+  price_usd: 50.0
+  url: https://www.amazon.com/s?k=levis+505+jeans+men
+Track Pants:
+- store: Nike
+  item: Nike track pants
+  price_usd: 60.0
+  url: https://www.nike.com/w?q=track%20pants

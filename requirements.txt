@@ -12,3 +12,4 @@ moderngl==5.13.0
 glcontext==3.1.0
 pymobiledevice3==11.34.1   # optional: usbmux device listing; the receiver's own usbmuxd client needs no package
 # Optional RTMPose backend: see requirements-rtm.txt (must be installed with --no-deps).
+vosk>=0.3.45          # offline wake word ('Fitbot') for the stylist; model: assets/models/vosk-model-small-en-us-0.15

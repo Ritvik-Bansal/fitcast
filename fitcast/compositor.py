@@ -23,6 +23,7 @@ class Compositor:
         self.rect_msg: list[int] | None = None
         self.msg_lines: list[str] = []
         self.msg_until = 0.0
+        self.msg_qr: np.ndarray | None = None
         self.out = np.zeros((self.H, self.W, 3), np.uint8)
         self._lit = np.zeros((self.H, self.W), np.uint8)
         self._lit3 = np.zeros((self.H, self.W, 3), np.uint8)
@@ -63,10 +64,11 @@ class Compositor:
         """Where the stylist's answer is written (camera px, on the wall between the strips)."""
         self.rect_msg = None if rect is None else [int(x) for x in rect]
 
-    def set_message(self, lines: list[str], now: float, duration_s: float) -> None:
-        """Show `lines` in the message panel until `now + duration_s` (empty list hides it)."""
+    def set_message(self, lines: list[str], now: float, duration_s: float, qr: np.ndarray | None = None) -> None:
+        """Show `lines` (and an optional QR image, BGR square) in the message panel until `now + duration_s`."""
         self.msg_lines = [str(x) for x in lines][:6]
         self.msg_until = now + float(duration_s)
+        self.msg_qr = qr
 
     def _draw_message(self, out: np.ndarray, track: TrackResult, now: float) -> None:
         if self.rect_msg is None or not self.msg_lines or now > self.msg_until:
@@ -81,7 +83,14 @@ class Compositor:
         fs = float(g["font_scale"])
         accent = tuple(int(c) for c in g["accent_color"])
         step = int(22 * fs / 0.55)
-        max_chars = max(8, int((x1 - x0) / (11 * fs / 0.55)))
+        text_w = x1 - x0
+        if self.msg_qr is not None:
+            q = (y1 - y0) - 8
+            if q >= 24:
+                qr = cv2.resize(self.msg_qr, (q, q), interpolation=cv2.INTER_NEAREST)
+                panel[4:4 + q, text_w - q - 4:text_w - 4] = qr
+                text_w -= q + 12
+        max_chars = max(8, int(text_w / (11 * fs / 0.55)))
         y = int(18 * fs / 0.55)
         for li, line in enumerate(self.msg_lines):
             if y > (y1 - y0) - 4:

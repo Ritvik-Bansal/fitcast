@@ -23,6 +23,21 @@ from .types import Outfit
 
 log = logging.getLogger("fitcast.stylist")
 
+
+def load_shop_links(path: str | Path) -> dict[str, list[dict]]:
+    """Curated 'where to buy' entries per garment name (`assets/shop_links.yaml`); {} when the file is missing."""
+    import yaml
+    p = Path(path)
+    if not p.exists():
+        log.warning("shop links file %s missing: shopping suggestions come from the model only", p)
+        return {}
+    raw = yaml.safe_load(p.read_text()) or {}
+    out: dict[str, list[dict]] = {}
+    for name, entries in raw.items():
+        out[str(name)] = [{"store": str(e.get("store", "")), "item": str(e.get("item", "")),
+                           "price_usd": e.get("price_usd"), "url": str(e.get("url", ""))} for e in (entries or [])]
+    return out
+
 _API = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 
@@ -67,6 +82,7 @@ class GeminiStylist:
         self.grounding = bool(cfg.get("grounding", False))
         self._q: queue.Queue = queue.Queue()
         self._busy = threading.Event()
+        self.links = load_shop_links(cfg.get("links_file", "assets/shop_links.yaml"))
         # tops: every outfit with a top; bottoms: first outfit per distinct bottom name (the demo pairs repeat "Jeans")
         self.top_ids = [i for i, o in enumerate(outfits) if o.top_front is not None]
         seen: set[str] = set()
@@ -84,17 +100,41 @@ class GeminiStylist:
         bots = [f"B{k}: {_bottom_name(self.outfits[i])}" for k, i in enumerate(self.bottom_ids)]
         return "TOPS\n" + "\n".join(tops) + "\nBOTTOMS\n" + "\n".join(bots)
 
-    def _prompt(self, question: str | None) -> str:
-        req = f'User request: "{question}"' if question else "The user's request is spoken in the attached audio."
+    def known_links(self, idx: int | None, part: str) -> list[dict]:
+        """Curated links for the top (part='top') or bottoms (part='bottom') of outfit `idx`."""
+        if idx is None:
+            return []
+        name = _top_name(self.outfits[idx]) if part == "top" else _bottom_name(self.outfits[idx])
+        return list(self.links.get(name, []))
+
+    def _links_text(self) -> str:
+        lines = []
+        for k, i in enumerate(self.top_ids):
+            for e in self.links.get(_top_name(self.outfits[i]), [])[:1]:
+                lines.append(f"T{k}: {e['item']} at {e['store']} ~${e['price_usd']} {e['url']}")
+        for k, i in enumerate(self.bottom_ids):
+            for e in self.links.get(_bottom_name(self.outfits[i]), [])[:1]:
+                lines.append(f"B{k}: {e['item']} at {e['store']} ~${e['price_usd']} {e['url']}")
+        return "\n".join(lines)
+
+    def _prompt(self, question: str | None, hint: str | None = None) -> str:
+        if question:
+            req = f'User request: "{question}"'
+        else:
+            req = "The user's request is spoken in the attached audio."
+            if hint:
+                req += f' A rough offline transcript (may contain errors): "{hint}"'
+        links = self._links_text()
+        link_rule = ("\n\nKNOWN PURCHASE LINKS (verified, use them for the chosen pieces):\n" + links) if links else ""
         return (
             "You are the stylist of a projection-mapped virtual try-on booth. The booth can only show the garments in "
-            "this catalogue, one top and one bottom at a time:\n\n" + self.catalog() + "\n\n" + req + "\n\n"
+            "this catalogue, one top and one bottom at a time:\n\n" + self.catalog() + link_rule + "\n\n" + req + "\n\n"
             "Pick exactly one top id and one bottom id that best fit the request (occasion, formality, colours, budget). "
             "If the request names garments the catalogue does not have, pick the closest match and say so briefly. "
-            "Then suggest 2 to 4 real-world places to buy similar items (store, item, approximate price in USD, store URL); "
-            "if a budget is given keep the suggested total under it. Reply with JSON only, no markdown, with keys: "
-            '"heard" (the request in one line), "top_id", "bottom_id", "say" (one spoken sentence, at most 25 words, '
-            'naming the outfit and why it fits), "shopping" (list of {"item","store","price_usd","url"}).'
+            "For shopping, list the known links of the chosen top and bottom; add at most one more real store suggestion "
+            "only if it helps the budget. If a budget is given keep the total under it. Reply with JSON only, no markdown, "
+            'with keys: "heard" (the request in one line), "top_id", "bottom_id", "say" (one spoken sentence, at most '
+            '25 words, naming the outfit and why it fits), "shopping" (list of {"item","store","price_usd","url"}).'
         )
 
     # -- requests (background) ---------------------------------------------------------------
@@ -106,11 +146,12 @@ class GeminiStylist:
         """Start a request for a typed question. False when another request is still running."""
         return self._start([{"text": self._prompt(question)}], question)
 
-    def ask_audio(self, wav_path: str | Path) -> bool:
-        """Start a request for a recorded question (16 kHz mono WAV). The model transcribes it itself."""
+    def ask_audio(self, wav_path: str | Path, hint: str | None = None) -> bool:
+        """Start a request for a recorded question (16 kHz mono WAV). The model transcribes it itself; `hint` is an
+        optional rough local transcript."""
         data = base64.b64encode(Path(wav_path).read_bytes()).decode()
-        parts = [{"text": self._prompt(None)}, {"inline_data": {"mime_type": "audio/wav", "data": data}}]
-        return self._start(parts, "(voice)")
+        parts = [{"text": self._prompt(None, hint)}, {"inline_data": {"mime_type": "audio/wav", "data": data}}]
+        return self._start(parts, hint or "(voice)")
 
     def _start(self, parts: list[dict], question: str) -> bool:
         if self._busy.is_set():
@@ -177,8 +218,13 @@ class GeminiStylist:
                 shopping.append({"item": str(s.get("item", ""))[:60], "store": str(s.get("store", ""))[:40],
                                  "price_usd": s.get("price_usd"), "url": str(s.get("url", ""))[:120]})
         heard = str(d.get("heard") or question)
+        # curated links for the chosen pieces always come first (verified URLs); the model's extras follow, deduplicated
+        merged: list[dict] = []
+        for e in self.known_links(top, "top")[:1] + self.known_links(bot, "bottom")[:1] + shopping:
+            if e.get("url") and all(e["url"] != m["url"] for m in merged):
+                merged.append(e)
         return StylistReply(question=heard, top_index=top, bottom_index=bot, say=str(d.get("say", ""))[:220],
-                            shopping=shopping[:4])
+                            shopping=merged[:4])
 
 
 def _id_index(value, prefix: str, ids: list[int]) -> int | None:
@@ -271,3 +317,45 @@ def speak(text: str, rate: int = 185) -> None:
         subprocess.Popen(["say", "-r", str(rate), text], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except FileNotFoundError:
         log.info("say not available; stylist reply: %s", text)
+
+
+# -- sharing the links --------------------------------------------------------------------------
+def make_qr(url: str, size_px: int) -> "np.ndarray | None":
+    """QR code image (size_px square, BGR) for `url`, or None when OpenCV lacks the encoder."""
+    import cv2
+    import numpy as np
+    try:
+        enc = cv2.QRCodeEncoder_create()
+        qr = enc.encode(url)
+    except Exception as e:  # noqa: BLE001
+        log.warning("QR encoder unavailable: %s", e)
+        return None
+    qr = cv2.resize(qr, (size_px, size_px), interpolation=cv2.INTER_NEAREST)
+    return cv2.cvtColor(qr, cv2.COLOR_GRAY2BGR)
+
+
+def links_text(reply: "StylistReply", outfit_name: str) -> str:
+    lines = [f"FitCast: {outfit_name}"]
+    for e in reply.shopping:
+        price = f" ~${e['price_usd']}" if e.get("price_usd") not in (None, "") else ""
+        lines.append(f"- {e['item']} ({e['store']}{price}): {e['url']}")
+    return "\n".join(lines)
+
+
+def share_links(reply: "StylistReply", outfit_name: str, cfg: dict) -> str:
+    """Write the links to `out/last_links.txt` and, when `imessage_to` is set, send them with Messages.app."""
+    text = links_text(reply, outfit_name)
+    Path("out").mkdir(exist_ok=True)
+    Path(cfg.get("links_out", "out/last_links.txt")).write_text(text + "\n")
+    to = str(cfg.get("imessage_to", "")).strip()
+    if to:
+        script = ('tell application "Messages"\n'
+                  '  set s to 1st account whose service type = iMessage\n'
+                  '  send "%s" to participant "%s" of s\n'
+                  'end tell') % (text.replace("\\", "\\\\").replace('"', '\\"'), to)
+        try:
+            subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            log.info("links sent by iMessage to %s", to)
+        except FileNotFoundError:
+            log.warning("osascript missing; links only in out/last_links.txt")
+    return text

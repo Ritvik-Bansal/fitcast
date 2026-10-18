@@ -404,7 +404,7 @@ selfcal:                    # self-service calibration (T-pose or key t): discs 
 stylist:                    # optional Gemini outfit picker (needs network + a key; the demo is offline without it)
   enabled: false            # or run with --stylist
   key_file: secrets/gemini.key   # gitignored; GEMINI_API_KEY in the environment wins
-  models: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.5-flash, gemini-3.1-flash-lite]   # tried in order on 404/429/503
+  models: [gemini-3.8-flash, gemini-3.1-flash-lite, gemini-3.7-flash, gemini-3.5-flash]   # free-tier Flash models, tried in order on 404/429/503
   timeout_s: 40
   temperature: 0.4
   grounding: false          # google_search tool for live shop links (needs quota)
@@ -415,3 +415,17 @@ stylist:                    # optional Gemini outfit picker (needs network + a k
   record_file: out/ask.wav
   record_max_s: 12
   ask_file: out/ask.txt     # write a typed question here to ask without a microphone
+  links_file: assets/shop_links.yaml   # curated 'where to buy' links per garment name (shown + QR on the wall)
+  links_out: out/last_links.txt        # the last answer's links, ready to copy / send
+  imessage_to: ""           # phone number or Apple ID: links are sent with Messages.app after every answer (macOS)
+  wake:                     # hands-free trigger: offline Vosk recogniser on the laptop microphone
+    enabled: true
+    model_dir: assets/models/vosk-model-small-en-us-0.15
+    device: ":0"            # ffmpeg avfoundation audio device
+    wake_words: [fitbot, fit bot, fit but, fitbit, fit bit, fat bit, fit bought, feet bot, fit pot]   # how the small model hears "Fitbot"
+    silence_rms: 250        # int16 RMS below this = silence
+    silence_s: 0.9          # pause that ends the request
+    max_request_s: 10
+    pre_roll_s: 0.6
+    chime: /System/Library/Sounds/Glass.aiff
+    request_file: out/wake_request.wav

@@ -13,6 +13,7 @@ import argparse
 import logging
 import sys
 import time
+import queue
 from pathlib import Path
 
 import cv2
@@ -180,6 +181,7 @@ class App:
         self._proj_person: np.ndarray | None = None
         self.stylist = None
         self.recorder = None
+        self.wake = None
         scfg = cfg.get("stylist", {})
         if (args.stylist or scfg.get("enabled", False)) and self.sensor_kind != "iphone":
             from fitcast.stylist import GeminiStylist, Recorder, load_api_key
@@ -189,6 +191,15 @@ class App:
                 self.recorder = Recorder(scfg)
                 log.info("stylist on: press %s to talk (again to send) or write a question to %s",
                          scfg.get("record_key", "v"), scfg.get("ask_file", "out/ask.txt"))
+                self._wake_events: queue.Queue = queue.Queue()
+                wcfg = scfg.get("wake", {})
+                if wcfg.get("enabled", True):
+                    from fitcast.wakeword import WakeListener
+                    self.wake = WakeListener(wcfg, on_wake=lambda: self._wake_events.put(("wake", None)),
+                                             on_request=lambda path, hint: self._wake_events.put(("request", (path, hint))),
+                                             on_error=lambda msg: self._wake_events.put(("error", msg)))
+                    self.wake.start()
+                    log.info("wake word on: say %r and then your request", wcfg.get("wake_words", ["fitbot"])[0])
         if self.sensor_kind != "iphone":
             self.compositor.use_separate_gallery_layer(True)
         self.depth_shift = (0.0, 0.0)
@@ -571,6 +582,21 @@ class App:
             if q and self.stylist.ask_text(q):
                 log.info("stylist question: %s", q)
                 self.compositor.set_message([q[:70], "Stylist is thinking..."], now, 30)
+        while self.wake is not None and not self._wake_events.empty():
+            kind, payload = self._wake_events.get_nowait()
+            if kind == "wake":
+                self.compositor.set_message(["Yes? I'm listening..."], now, 15)
+                chime = scfg.get("wake", {}).get("chime", "/System/Library/Sounds/Glass.aiff")
+                if chime:
+                    subprocess.Popen(["afplay", chime], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif kind == "request":
+                path, hint = payload
+                if self.stylist.ask_audio(path, hint):
+                    self.compositor.set_message([f"Heard: {hint[:60]}" if hint else "Heard you", "Stylist is thinking..."], now, 30)
+            elif kind == "error":
+                log.error("wake word listener: %s", payload)
+                self.compositor.set_message(["Voice trigger off", str(payload)[:60]], now, 8)
+                self.wake = None
         r = self.stylist.poll()
         if r is None:
             return
@@ -584,8 +610,11 @@ class App:
         for sh in r.shopping:
             price = f" ~${sh['price_usd']}" if sh.get("price_usd") not in (None, "") else ""
             lines.append(f"{sh['item']} - {sh['store']}{price}")
-        lines.append("Prices approximate")
-        self.compositor.set_message(lines, now, float(scfg.get("message_s", 30)))
+        lines.append("Prices approximate - scan to shop")
+        from fitcast.stylist import make_qr, share_links
+        qr = make_qr(r.shopping[0]["url"], 240) if r.shopping else None
+        self.compositor.set_message(lines, now, float(scfg.get("message_s", 30)), qr)
+        share_links(r, self.gallery.current.name, scfg)
         log.info("stylist (%s, %.1f s): %s | %s | %s", r.model, r.latency_s, r.question, r.say,
                  "; ".join(f"{x['item']} @ {x['store']} ${x['price_usd']} {x['url']}" for x in r.shopping))
         if scfg.get("speak", True):
@@ -756,6 +785,8 @@ class App:
                  st["render"], loop_ms, 1000.0 / loop_ms if loop_ms else 0.0, self.latency_ms)
         if self.gesture_log:
             log.info("gestures: %s", ", ".join(f"{ev}@{t:.2f}" for t, ev in self.gesture_log))
+        if self.wake is not None:
+            self.wake.stop()
 
 
 def main(argv: list[str] | None = None) -> int:
