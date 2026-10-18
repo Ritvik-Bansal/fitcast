@@ -52,6 +52,10 @@ class SizeEstimator:
     def __init__(self, cfg: dict, height_cm: float | None = None) -> None:
         self._min_frontal = float(cfg.get("min_frontal_ratio", 0.0))
         self._min_ankle_frames = int(cfg.get("min_ankle_frames", 10))
+        self._label_hold_s = float(cfg.get("label_hold_s", 0.0))
+        self._shown_size: str | None = None
+        self._cand_size: str | None = None
+        self._cand_since = 0.0
         """`cfg` is `config["sizing"]`; `height_cm` defaults to `cfg["height_cm"]`."""
         self.cfg = cfg
         self._min_vis = float(cfg.get("min_visibility", _DEFAULTS["min_visibility"]))
@@ -72,6 +76,7 @@ class SizeEstimator:
         self.reset()
 
     def reset(self) -> None:
+        self._shown_size = self._cand_size = None
         """Drop all accumulated frames (new person / new height)."""
         self._buf.clear()
         self._warned.clear()
@@ -109,6 +114,19 @@ class SizeEstimator:
             ankles=all(m.ankles for m in buf),
         )
 
+    def _stable_size(self, size: str) -> str:
+        """Displayed size: a new candidate must persist `label_hold_s` seconds before it replaces the shown one."""
+        import time
+        now = time.perf_counter()
+        if size == self._shown_size:
+            self._cand_size, self._cand_since = size, now
+            return size
+        if size != self._cand_size:
+            self._cand_size, self._cand_since = size, now
+        if self._shown_size is None or now - self._cand_since >= self._label_hold_s:
+            self._shown_size = size
+        return self._shown_size
+
     def recommendation(self, size_table: str | None = None) -> tuple[str, str]:
         """(size_text, measure_text) for the wall panel; `size_table` comes from the current outfit."""
         m = self.measurements()
@@ -118,7 +136,7 @@ class SizeEstimator:
         chest = m.chest_cm * self._circ_factor
         value = {"shoulder": m.shoulder_cm, "chest": chest, "torso": m.torso_cm,
                  "inseam": m.inseam_cm}.get(table["key"])
-        size_text = "Size: --" if value is None else f"Size {recommend_size(value, table)} (estimate)"
+        size_text = "Size: --" if value is None else f"Size {self._stable_size(recommend_size(value, table))} (estimate)"
         inseam = "--" if m.inseam_cm is None else f"{m.inseam_cm:.0f} cm"
         measure_text = (f"Shoulder {m.shoulder_cm:.0f} cm  Chest {chest:.0f} cm  "
                         f"Torso {m.torso_cm:.0f} cm  Inseam {inseam}")
@@ -192,7 +210,7 @@ class SizeEstimator:
                 first = band.argmax(axis=1)
                 last = band.shape[1] - 1 - band[:, ::-1].argmax(axis=1)
                 widths = (last - first)[rows]
-                return float(widths.min())
+                return float(np.percentile(widths, float(self.cfg.get("chest_row_percentile", 25))))
         self._warn_once("chest", "sizing: clothes mask empty in chest band, using %.2f x shoulder width",
                         self._chest_frac)
         return self._chest_frac * shoulder_px

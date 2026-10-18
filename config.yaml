@@ -166,7 +166,9 @@ sizing:
   height_cm: 175            # operator enters this; --height overrides
   nose_to_ankle_ratio: 0.88 # nose-to-ankle distance as a fraction of standing height
   shoulder_to_hip_ratio: 0.32   # MediaPipe shoulder-centre -> hip-centre as a fraction of height (fallback when ankles unseen; measured on the test clips)
-  average_frames: 60
+  average_frames: 150       # ~5 s at 30 fps
+  chest_row_percentile: 25  # robust 'narrow' row width within the chest band (0 = min)
+  label_hold_s: 3.0         # a new size label must persist this long before it is shown
   chest_mask_band_frac: [0.25, 0.60]   # fraction of shoulder->hip span searched; the narrowest row wins (below sleeves, above hem)
   min_frontal_ratio: 0.9    # only accumulate when shoulder_width / ref >= this (squarely facing the camera)
   min_ankle_frames: 10      # use ankle-based scale once this many recent frames have it (never mix the two scales)
