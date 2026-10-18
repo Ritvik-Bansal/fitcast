@@ -74,7 +74,7 @@ tracker:
     side_ratio: 0.55        # shoulder_width / ref < this -> side
     hold_frames: 6
     ref_window_frames: 600  # frontal reference = max shoulder width over this many recent frames (~20 s): self-healing
-    face_vis_back_threshold: 0.3   # nose/eye visibility below this is a weak "back" hint
+    face_vis_back_threshold: 0.0   # weak "back" hint from face visibility: off (MediaPipe reports ~1.0 from behind; Vision confidences drop with distance)
 
 smoothing:
   min_cutoff: 1.0

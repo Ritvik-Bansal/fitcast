@@ -210,6 +210,7 @@ class IPhoneSensor:
         self.offset_s: float | None = None          # phone clock - Mac perf_counter
         self.phone_ts = self.send_ts = math.nan
         self.info: dict = {}
+        self.last_header: dict = {}          # phone-side per-frame status fields (fps, thermal, focus, ...)
         self.last_depth_raw = self.last_conf_raw = self.last_seg_raw = None
         self.last_conf: np.ndarray | None = None
         self.last_seg: np.ndarray | None = None
@@ -416,6 +417,8 @@ class IPhoneSensor:
             self._latest = (image, t_recv, self._seq)
             self._track = track
             self.phone_ts, self.send_ts = phone_ts, send_ts
+            self.last_header = {k: h.get(k) for k in ("seq", "fps", "pose_fps", "thermal_state", "focus_locked",
+                                                      "orientation", "depth_valid_frac", "dropped", "img_w", "img_h")}
             self.last_depth_raw, self.last_conf_raw, self.last_seg_raw = depth_raw, conf_raw, seg_raw
             self.last_conf, self.last_seg = conf, seg
         self.stats["process_ms"] = (time.perf_counter() - t0) * 1e3
