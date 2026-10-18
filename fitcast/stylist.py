@@ -128,7 +128,7 @@ class GeminiStylist:
         if question:
             req = f'User request: "{question}"'
         else:
-            req = ("The user's request is spoken in the attached audio; it may start with the wake word 'Fitbot' "
+            req = ("The user's request is spoken in the attached audio; it may start with the wake phrase 'Magic mirror' "
                    "(ignore that word).")
             if hint:
                 req += f' A rough offline transcript (may contain errors): "{hint}"'

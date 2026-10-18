@@ -238,7 +238,7 @@ echo "AIza..." > secrets/gemini.key            # or export GEMINI_API_KEY=...
 .venv/bin/python scripts/stylist_cli.py "casual plaid shirt look"      # test without camera / projector
 ```
 Hands-free: with `stylist.wake.enabled` (default) an offline recogniser (Vosk, `assets/models/vosk-model-small-en-us-0.15`,
-`uv pip install --python .venv/bin/python vosk`) listens on the laptop microphone; say **"Fitbot"**, wait for the chime,
+`uv pip install --python .venv/bin/python vosk`) listens on the laptop microphone; say **"Magic mirror"**, wait for the chime,
 then ask. The request audio goes to Gemini (free-tier Flash model), the answer dresses the person, is spoken aloud and
 appears in the band at the top of the beam together with a QR code of the first shop link. Links come from the curated
 table `assets/shop_links.yaml` (one or two verified retailer pages per garment); the model may add one more. Every answer's

@@ -10,11 +10,12 @@ from fitcast.wakeword import WakeListener, request_like, strip_wake, wake_in
 
 
 def test_wake_variants():
-    assert wake_in("hey fitbot find me a jacket")
-    assert wake_in("fit bot, what should i wear")
-    assert wake_in("fat fitbit find me a casual outfit")
+    assert wake_in("magic mirror find me a jacket")
+    assert wake_in("hey magic mirrors, what should i wear")
+    assert wake_in("the magic mira find me a casual outfit")
     assert not wake_in("find me a casual outfit")
-    assert strip_wake("fat fitbit find me a casual outfit") == "find me a casual outfit"
+    assert not wake_in("that was magic")
+    assert strip_wake("hey magic mirror find me a casual outfit") == "find me a casual outfit"
 
 
 @pytest.mark.skipif(shutil.which("ffmpeg") is None or shutil.which("say") is None
@@ -22,7 +23,7 @@ def test_wake_variants():
 def test_listener_records_request_after_wake(tmp_path):
     pytest.importorskip("vosk")
     aiff, wav = tmp_path / "q.aiff", tmp_path / "q.wav"
-    subprocess.run(["say", "-o", str(aiff), "Fitbot, find me a casual outfit with a hoodie and sweatpants"], check=True)
+    subprocess.run(["say", "-o", str(aiff), "Magic mirror, find me a casual outfit with a hoodie and sweatpants"], check=True)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(aiff), "-ac", "1", "-ar", "16000", str(wav)], check=True)
     events: queue.Queue = queue.Queue()
     cfg = {"request_file": str(tmp_path / "req.wav"), "silence_s": 0.6}

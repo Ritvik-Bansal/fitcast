@@ -223,7 +223,7 @@ class App:
                                              on_request=lambda path, hint: self._wake_events.put(("request", (path, hint))),
                                              on_error=lambda msg: self._wake_events.put(("error", msg)), extra_keywords=words)
                     self.wake.start()
-                    log.info("wake word on: say %r and then your request", wcfg.get("wake_words", ["fitbot"])[0])
+                    log.info("wake phrase on: say %r, wait for the chime, then your request", wcfg.get("wake_words", ["magic mirror"])[0])
         if self.sensor_kind != "iphone":
             self.compositor.use_separate_gallery_layer(True)
         self.depth_shift = (0.0, 0.0)
@@ -672,7 +672,7 @@ class App:
             elif kind == "request":
                 path, hint = payload
                 if path is None:
-                    self.compositor.set_message(["Didn't catch a request. Say Fitbot, then ask."], now, 5)
+                    self.compositor.set_message(["Didn't catch a request. Say Magic mirror, then ask."], now, 5)
                 elif self.stylist.ask_audio(path, hint):
                     self.compositor.set_message([f"Heard: {hint[:60]}" if hint else "Heard you", "Stylist is thinking..."], now, 30)
                     chime = scfg.get("wake", {}).get("chime", "/System/Library/Sounds/Glass.aiff")
@@ -692,10 +692,10 @@ class App:
             return
         if r.top_index is None and r.bottom_index is None:
             log.info("stylist understood no request (%r); outfit unchanged", r.question)
-            self.compositor.set_message(["Didn't catch that.", "Say Fitbot, wait for the chime, then ask."], now, 6)
+            self.compositor.set_message(["Didn't catch that.", "Say Magic mirror, wait for the chime, then ask."], now, 6)
             if scfg.get("speak", True):
                 from fitcast.stylist import speak
-                speak("Sorry, I didn't catch that. Say Fitbot, then ask.")
+                speak("Sorry, I didn't catch that. Say magic mirror, then ask.")
             return
         self.set_pair(r.top_index, r.bottom_index, now)
         self.last_gesture_t = now

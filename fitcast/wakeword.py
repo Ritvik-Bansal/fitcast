@@ -1,5 +1,5 @@
 """Hands-free trigger for the stylist: an offline recogniser (Vosk, small English model) listens to the laptop
-microphone all the time; when the wake word ("Fitbot") is heard the following utterance is recorded until a pause
+microphone all the time; when the wake phrase ("Magic mirror") is heard the following utterance is recorded until a pause
 and handed over as a WAV (plus the rough local transcript) for the stylist to answer.
 
 Audio comes from ffmpeg (avfoundation microphone, or a file for tests) as 16 kHz mono PCM on a pipe. Nothing here
@@ -22,19 +22,19 @@ import numpy as np
 
 log = logging.getLogger("fitcast.wakeword")
 
-_DEFAULT_VARIANTS = ("fitbot", "fit bot", "fit but", "fitbit", "fit bit", "fat bit", "fit bought", "feet bot", "fit pot")
+_DEFAULT_VARIANTS = ("magic mirror", "magic mirrors", "magic mira", "magic mere", "magic mirra", "match mirror", "magic near", "magic marer", "magic miro")
 
 
 def normalise(text: str) -> str:
     return re.sub(r"[^a-z ]+", " ", text.lower()).strip()
 
 
-_WAKE_RE = re.compile(r"\b(fit|fitt|fed|phet|feet|vit|fitz|fift|foot)\s*(bot|bots|but|bit|pot|bought|boat|box|bud|bat|bart|part|pod|bob|bad|bet|boss|bought)\b")
+_WAKE_RE = re.compile(r"\b(magic|magik|match|majik)\s*(mirror|mirrors|mira|mere|mirra|miro|near|marer|mere|mara)\b")
 
 
 def wake_in(text: str, variants: tuple[str, ...] | list[str] = _DEFAULT_VARIANTS) -> bool:
     """True when any wake variant occurs in `text` (spaces ignored, so 'fit bot' == 'fitbot'), or the small model's
-    usual mishearings of "Fitbot": a 'fit'-like word followed by a 'bot'-like word."""
+    usual mishearings of "Magic mirror"."""
     t = normalise(text)
     squashed = t.replace(" ", "")
     if any(v.replace(" ", "") in squashed for v in variants):
@@ -204,7 +204,7 @@ class WakeListener(threading.Thread):
                     continue
                 if final:
                     self._last_final = time.perf_counter()
-                if text and (time.perf_counter() - getattr(self, "_last_text_log", 0.0) > 3.0 or "fit" in text or "fet" in text):
+                if text and (time.perf_counter() - getattr(self, "_last_text_log", 0.0) > 3.0 or "magic" in text or "mirror" in text):
                     log.info("heard: %r", text[-60:])
                     self._last_text_log = time.perf_counter()
                 if text and wake_in(text, self.variants):
