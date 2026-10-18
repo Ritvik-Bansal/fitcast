@@ -215,6 +215,7 @@ class App:
                 wcfg = scfg.get("wake", {})
                 if wcfg.get("enabled", True):
                     from fitcast.wakeword import WakeListener
+                    subprocess.run(["pkill", "-f", "ffmpeg -loglevel error -f avfoundation -i :"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     self.wake = WakeListener(wcfg, on_wake=lambda: self._wake_events.put(("wake", None)),
                                              on_request=lambda path, hint: self._wake_events.put(("request", (path, hint))),
                                              on_error=lambda msg: self._wake_events.put(("error", msg)))
@@ -653,6 +654,9 @@ class App:
                 chime = scfg.get("wake", {}).get("chime", "/System/Library/Sounds/Glass.aiff")
                 if chime:
                     subprocess.Popen(["afplay", chime], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if scfg.get("wake", {}).get("say_on_wake", "Yes?"):
+                    from fitcast.stylist import speak
+                    speak(str(scfg["wake"].get("say_on_wake", "Yes?")))
             elif kind == "request":
                 path, hint = payload
                 if self.stylist.ask_audio(path, hint):

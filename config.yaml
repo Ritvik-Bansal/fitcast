@@ -450,7 +450,11 @@ stylist:                    # optional Gemini outfit picker (needs network + a k
   wake:                     # hands-free trigger: offline Vosk recogniser on the laptop microphone
     enabled: true
     model_dir: assets/models/vosk-model-small-en-us-0.15
-    device: ":0"            # ffmpeg avfoundation audio device
+    device: ":0"            # ffmpeg avfoundation audio device (fallback) ...
+    device_name: MacBook    # ... resolved by name each start: indices shift when a phone or headset appears
+    gain: 3.0               # software gain before recognition (the person stands ~5 m from the laptop)
+    say_on_wake: "Yes?"     # spoken acknowledgement in addition to the chime
+    max_restarts: 20
     wake_words: [fitbot, fit bot, fit but, fitbit, fit bit, fat bit, fit bought, feet bot, fit pot]   # how the small model hears "Fitbot"
     silence_rms: 250        # int16 RMS below this = silence
     silence_s: 0.9          # pause that ends the request

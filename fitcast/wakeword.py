@@ -79,9 +79,30 @@ class WakeListener(threading.Thread):
             self._proc.kill()
 
     # -- audio source ------------------------------------------------------------------------------
+    def _device(self) -> str:
+        """avfoundation audio spec: `device_name` (substring, e.g. 'MacBook') resolved against the current device
+        list, else the configured index spec (':0'). Devices re-number when a phone or headset appears."""
+        name = str(self.cfg.get("device_name", "")).strip()
+        if name:
+            try:
+                r = subprocess.run(["ffmpeg", "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
+                                   capture_output=True, text=True, timeout=10)
+                audio = False
+                for line in (r.stderr + r.stdout).splitlines():
+                    if "audio devices" in line:
+                        audio = True
+                        continue
+                    m = re.search(r"\] \[(\d+)\] (.+)$", line)
+                    if audio and m and name.lower() in m.group(2).lower():
+                        return f":{m.group(1)}"
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+            log.warning("audio device %r not found; using %s", name, self.cfg.get("device", ":0"))
+        return str(self.cfg.get("device", ":0"))
+
     def _open(self) -> subprocess.Popen:
         if self.source is None:
-            src = ["-f", "avfoundation", "-i", str(self.cfg.get("device", ":0"))]
+            src = ["-f", "avfoundation", "-i", self._device()]
         else:
             src = ["-re", "-i", str(self.source)]
         cmd = ["ffmpeg", "-loglevel", "error"] + src + ["-ac", "1", "-ar", str(self.rate), "-f", "s16le", "-acodec", "pcm_s16le", "-"]
@@ -108,16 +129,40 @@ class WakeListener(threading.Thread):
         buf: list[bytes] = []
         silence, heard, t_start = 0.0, False, 0.0
         log.info("wake word listening (%s)", "microphone" if self.source is None else self.source)
+        restarts, last_beat, beat_rms, beat_n = 0, time.perf_counter(), 0.0, 0
+        gain = float(self.cfg.get("gain", 1.0))
         while not self._quit.is_set():
             data = self._proc.stdout.read(self.chunk)
             if not data:
-                break
+                if self.source is not None or restarts >= int(self.cfg.get("max_restarts", 20)):
+                    break
+                err = (self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else "").strip()
+                log.warning("microphone stream ended (%s); reopening", err[:120] or "no error text")
+                time.sleep(1.0)
+                restarts += 1
+                try:
+                    self._proc = self._open()
+                except FileNotFoundError:
+                    break
+                continue
+            if gain != 1.0:
+                a = np.frombuffer(data, np.int16).astype(np.float32) * gain
+                data = np.clip(a, -32768, 32767).astype(np.int16).tobytes()
+            # heartbeat: microphone level every 5 s so a dead or wrong microphone is visible in the log
+            level = float(np.sqrt(np.mean(np.frombuffer(data, np.int16).astype(np.float32) ** 2)))
+            beat_rms += level; beat_n += 1
+            if time.perf_counter() - last_beat > 5.0:
+                log.info("mic level rms %.0f (%s)", beat_rms / max(beat_n, 1), self.state)
+                last_beat, beat_rms, beat_n = time.perf_counter(), 0.0, 0
             ring.append(data)
             if self.state == "idle":
                 if rec.AcceptWaveform(data):
                     text = json.loads(rec.Result()).get("text", "")
                 else:
                     text = json.loads(rec.PartialResult()).get("partial", "")
+                if text and time.perf_counter() - getattr(self, "_last_text_log", 0.0) > 3.0:
+                    log.info("heard: %r", text[-60:])
+                    self._last_text_log = time.perf_counter()
                 if text and wake_in(text, self.variants):
                     log.info("wake word heard: %r", text)
                     self.state = "listening"
