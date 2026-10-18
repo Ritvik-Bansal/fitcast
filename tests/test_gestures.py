@@ -221,7 +221,7 @@ def test_zone_swipes_tag_top_and_bottom():
     from fitcast.gestures import GestureDetector as Gestures
     cfg = dict(yaml.safe_load(open("config.yaml"))["gestures"])
     cfg["zone_swipes"] = True
-    for wrist_dy, suffix in ((0.3, "_top"), (1.4, "_bottom")):      # shoulder-width units below the shoulder line
+    for wrist_dy, suffix in ((-0.6, "_top"), (0.6, "_bottom")):     # shoulder-width units below the shoulder line
         g = Gestures(cfg)
         events = []
         for i in range(12):

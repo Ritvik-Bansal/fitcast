@@ -46,7 +46,9 @@ class GestureDetector:
         self.log_events = bool(cfg["log_events"])
         self.min_vis = float(cfg.get("min_wrist_visibility", _DEFAULT_MIN_WRIST_VISIBILITY))
         self.zone_swipes = bool(cfg.get("zone_swipes", False))
-        self.zone_margin = float(cfg.get("zone_margin_sw", 0.0))
+        self.zone_line = float(cfg.get("zone_line_sw", -0.2))
+        self.min_travel_bottom = float(cfg.get("min_travel_sw_bottom", 0.7))
+        self.min_velocity_bottom = float(cfg.get("min_velocity_sw_per_s_bottom", 1.5))
         self.min_samples = int(cfg.get("min_samples", 4))   # guards against a single-frame landmark jump
         self.max_velocity = float(cfg.get("max_velocity_sw_per_s", 12.0))
         self.max_travel = float(cfg.get("max_travel_sw", 2.6))
@@ -91,7 +93,6 @@ class GestureDetector:
         span = (float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - nose_y
         band_top = nose_y + self.band_top_frac * span
         band_bottom = nose_y + self.band_bottom_frac * span
-        hip_ny = ((float(j[L_HIP, 1]) + float(j[R_HIP, 1])) * 0.5 - cy) / sw   # hip line, shoulder-width units
 
         if self._raise_hands(now, j, vis, nose_y):
             return ["toggle_gallery"]
@@ -109,19 +110,23 @@ class GestureDetector:
             t0, nx0, _ = buf[0]
             dt = now - t0
             dx = buf[-1][1] - nx0
-            if len(buf) < self.min_samples or dt <= 0.0 or abs(dx) <= self.min_travel:
+            # zone first: swipes high up (above `zone_line_sw`, shoulder-width units from the shoulder centre,
+            # negative = above) are for tops; everything lower is for bottoms, which may be subtler
+            mean_ny = sum(b[2] for b in buf) / len(buf)
+            zone = "top" if mean_ny < self.zone_line else "bottom"
+            travel_min = self.min_travel if (zone == "top" or not self.zone_swipes) else self.min_travel_bottom
+            vel_min = self.min_velocity if (zone == "top" or not self.zone_swipes) else self.min_velocity_bottom
+            if len(buf) < self.min_samples or dt <= 0.0 or abs(dx) <= travel_min:
                 continue
             velocity = abs(dx) / dt
-            if velocity <= self.min_velocity:
+            if velocity <= vel_min:
                 continue
             if velocity > self.max_velocity or abs(dx) > self.max_travel:
                 buf.clear()                 # faster/farther than an arm can move: a landmark jump, not a swipe
                 continue
             event = self._direction(dx)
             if self.zone_swipes:
-                # swipe above the hips -> tops, below -> bottoms (mix-and-match)
-                mean_ny = sum(b[2] for b in buf) / len(buf)
-                event += "_top" if mean_ny < hip_ny - self.zone_margin else "_bottom"
+                event += "_" + zone
             self._cooldown_until = now + self.cooldown_s
             self._clear()
             if self.log_events:
