@@ -101,3 +101,9 @@ Each milestone: what was run, what was observed.
 - `main.py --sensor iphone`: phone joints + depth body mask -> `Tracker.process_external` (same mask/head/facing logic), depth-correct GPU projection when calibration3d.yaml exists, else the 2D homography; key `b` relearns the depth background. Loopback against the fake phone: 400 frames at 42-47 fps with recording, pose cost 0.3 ms.
 - iOS app `ios/FitCastSensor` (11 Swift files): ARKit session with semantics fallback chain, 60 fps 4:3 format, Vision one-in-flight pose with orientation picker, 5x5 median LiDAR lift, VTPixelTransfer + VideoToolbox JPEG, NWListener TCP with one-frame queue, ping echo, info message, capability tab with 10 s fps measurement. Device build clean; Swift-emitted bytes decode in the Python reader; orientation un-rotation verified with Vision on macOS (0.00 px). Not yet run on the phone.
 - Open: device deploy (iOS 27 beta vs Xcode 26.2), on-device capability numbers, usbmux throughput, real Gray-code capture with the phone, accuracy_check.py, latency measurement.
+
+## 3D path on the device (2026-10-17 20:15-20:25)
+- `scripts/ios_deploy.sh`: BUILD SUCCEEDED and install OK on iOS 27.2 with Xcode 26.2; first launch denied until the user lifted a Screen Time restriction and trusted the developer profile.
+- Capability report (info message): semantics `sceneDepth+personSegmentationWithDepth`, 1920x1440 @ 60, measured 60 fps, depth/seg 256x192, JPEG hardware encoder, thermal nominal. Full table in DECISIONS.md.
+- Receiver over USB: 60.0 fps, ~15.5 MB/s, 0 drops / 2710 frames, RTT 1-4 ms, capture->Mac 41-56 ms. Depth 100% valid, median 3.07 m.
+- Vision joints: none detected in the first probe because the phone was hand-held in portrait at arm's length (image sideways); needs the landscape mount at 2-3 m.
