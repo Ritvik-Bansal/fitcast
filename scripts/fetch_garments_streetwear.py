@@ -43,10 +43,10 @@ for p in (ROOT, ROOT / "scripts"):
         sys.path.insert(0, str(p))
 
 from fitcast.garments import composite, garment_cfg, load_outfit  # noqa: E402
-from fetch_garments import (BG_DIST, WORK_MAX_PX, _disk, _largest_filled, flatten_chroma, garment_rgba,  # noqa: E402
-                            layout_bottom, layout_top, print_mask, torso_region)
+from fetch_garments import (BG_DIST, TORSO_HEM_TOL, TORSO_MIN_FRAC, WORK_MAX_PX, _disk, _largest_filled,  # noqa: E402
+                            flatten_chroma, garment_rgba, layout_bottom, layout_top, print_mask, torso_region)
 from fetch_garments_bottoms import rectify_bottom  # noqa: E402
-from prepare_garments import _hex, _median_color, load_config, write_outfit  # noqa: E402
+from prepare_garments import _hex, _median_color, estimate_body_region, load_config, write_outfit  # noqa: E402
 
 log = logging.getLogger("fitcast.fetch_garments_streetwear")
 
@@ -66,7 +66,9 @@ STUSSY, FOG, JR = "https://www.stussy.com", "https://fearofgod.com", "https://ju
 CWIP = "https://cdn.media.amplience.net/i/carhartt_wip"
 
 # key -> photo source + cut-out hints (hint names as in fetch_garments.MANIFEST: white, bg_dist, crop, gamma,
-# open_frac, smooth, print_dist, flat_chroma, region).
+# open_frac, smooth, print_dist, flat_chroma) plus `region`: (x0, y0, x1, y1) or "hem_rows" (see _region).
+# Flat-laid hoodies get a hand-measured region: their sleeves lie along the body down to the hem, so no
+# alpha-profile estimate separates sleeve from torso.
 #   shopify store: `store` + `handle`, `front` / `back` = index into the product's image list
 #   direct: `page` + `front_url` / `back_url`
 ITEMS: dict[str, dict] = {
@@ -77,10 +79,10 @@ ITEMS: dict[str, dict] = {
                              front=0, back=1, white=250, bg_dist=6,
                              desc="Stussy 8 Ball Tee, natural (back: 8-ball graphic)"),
     "stussy_hoodie_ash": dict(kind="top", brand="Stussy", store=STUSSY, handle="1925000-basic-stussy-hoodie-ash-heather",
-                              front=0, back=1, white=250, bg_dist=6,
+                              front=0, back=1, white=250, bg_dist=6, region=(0.20, 0.01, 0.82, 0.90),
                               desc="Stussy Basic Stussy Hoodie, ash heather (back: big script logo)"),
     "fog_hoodie": dict(kind="top", brand="Fear of God ESSENTIALS", store=FOG, handle="classic-hoodie-rw01501-oatmeal-heather",
-                       front=2, back=3, white=250, bg_dist=5,
+                       front=2, back=3, white=250, bg_dist=5, region=(0.20, 0.04, 0.80, 0.87),
                        desc="Fear of God ESSENTIALS Classic Hoodie, oatmeal heather"),
     "fog_tee": dict(kind="top", brand="Fear of God ESSENTIALS", store=FOG, handle="classic-short-sleeve-tee-rw01496-warm-heather",
                     front=0, back=1, white=250, bg_dist=5,
@@ -89,30 +91,28 @@ ITEMS: dict[str, dict] = {
                              handle="nike-sportswear-tech-fleece-full-zip-up-hoodie-signal-blue-black", front=0, back=1,
                              desc="Nike Sportswear Tech Fleece Full-Zip Hoodie, signal blue / black (CU4489-403)"),
     "lakers_jersey": dict(kind="top", brand="Nike / Los Angeles Lakers", store="https://lakersstore.com",
-                          handle="doncic-icon-swingman-jersey", front=0, back=1,
+                          handle="doncic-icon-swingman-jersey", front=0, back=1, region="hem_rows",
                           desc="Los Angeles Lakers Icon Swingman Jersey (Doncic #77), gold"),
     "ch_hoodie": dict(kind="top", brand="Chrome Hearts", store=JR, handle="chrome-hearts-vertical-logo-hoodie-54684684684",
-                      front=0, back=1, desc="Chrome Hearts Vertical Logo Hoodie, orange (resale listing)"),
+                      front=0, back=1, region=(0.16, 0.06, 0.86, 0.85), desc="Chrome Hearts Vertical Logo Hoodie, orange (resale listing)"),
     # ---------------------------------------------------------------- bottoms
     "fog_sweatpant": dict(kind="bottom", brand="Fear of God ESSENTIALS", store=FOG,
-                          handle="classic-sweatpant-rw01503-oatmeal-heather", front=0, back=1, white=250, bg_dist=5,
-                          desc="Fear of God ESSENTIALS Classic Sweatpant, oatmeal heather"),
+                          handle="classic-sweatpant-rw01503-warm-heather", front=0, back=1,
+                          desc="Fear of God ESSENTIALS Classic Sweatpant, warm heather"),
     "stussy_bigol_jean": dict(kind="bottom", brand="Stussy", store=STUSSY, handle="116761-big-ol-jean-denim-light-wash-indigo",
                               front=6, back=7, desc="Stussy Big Ol' Jean, light wash indigo (baggy denim)"),
     "stussy_fleece_pant": dict(kind="bottom", brand="Stussy", store=STUSSY, handle="116812-fleece-pant-grey-heather",
                                front=4, back=5, white=250, bg_dist=6, desc="Stussy Fleece Pant, grey heather"),
     "stussy_track_pant": dict(kind="bottom", brand="Stussy", store=STUSSY, handle="116785-side-stripe-track-pant-olive",
-                              front=5, back=6, desc="Stussy Side Stripe Track Pant, olive"),
+                              front=5, back=6, white=245, bg_dist=10,
+                              desc="Stussy Side Stripe Track Pant, olive (cream side stripes)"),
     "carhartt_cargo": dict(kind="bottom", brand="Carhartt WIP",
                            page="https://www.carhartt-wip.com/en-de/p/og-cargo-pant-wip-dusty-h-stone-washed-46",
-                           front_url=f"{CWIP}/I037585_3TF_06-ST-01", back_url=f"{CWIP}/I037585_3TF_06-ST-02",
+                           front_url=f"{CWIP}/I037585_3TF_06-ST-02", back_url=f"{CWIP}/I037585_3TF_06-ST-01", open_frac=0.012,
                            desc="Carhartt WIP OG Cargo Pant (I037585), dusty H brown, stone washed"),
     "ch_cross_jeans": dict(kind="bottom", brand="Chrome Hearts", store=JR,
                            handle="chrome-hearts-levis-517-orange-tab-cross-patch-jeans-58962478541845448", front=0, back=1,
                            desc="Chrome Hearts x Levi's 517 Orange Tab Cross Patch Jeans (pink leather crosses, resale)"),
-    "ch_carpenter": dict(kind="bottom", brand="Chrome Hearts", store=JR,
-                         handle="chrome-hearts-cross-patch-double-knee-carpenter-pants-8646464684", front=0, back=1,
-                         desc="Chrome Hearts Cross Patch Double Knee Carpenter Pants, tan (resale)"),
 }
 
 # Outfit folders written by `build`: (id, name, sleeve, top key, bottom key)
@@ -126,9 +126,9 @@ PAIRS: list[tuple[str, str, str, str, str]] = [
     ("46_essentials_tee_carhartt_cargo", "Essentials Tee + Carhartt WIP Cargo", "short", "fog_tee", "carhartt_cargo"),
     ("47_stussy_8ball_cross_jeans", "Stussy 8 Ball Tee + Chrome Hearts Jeans", "short", "stussy_8ball_tee", "ch_cross_jeans"),
     ("48_stussy_hoodie_track_pant", "Stussy Hoodie + Side Stripe Track Pant", "long", "stussy_hoodie_ash", "stussy_track_pant"),
-    ("49_essentials_tee_ch_carpenter", "Essentials Tee + Chrome Hearts Carpenters", "short", "fog_tee", "ch_carpenter"),
+    ("49_essentials_tee_baggy_jeans", "Essentials Tee + Stussy Big Ol' Jeans", "short", "fog_tee", "stussy_bigol_jean"),
     ("50_tech_fleece_essentials_sweats", "Nike Tech Fleece + Essentials Sweatpants", "long", "nike_tech_fleece", "fog_sweatpant"),
-    ("51_stussy_tee_ch_carpenter", "Stussy Tee + Chrome Hearts Carpenters", "short", "stussy_tee_khaki", "ch_carpenter"),
+    ("51_stussy_tee_carhartt_cargo", "Stussy Tee + Carhartt WIP Cargo", "short", "stussy_tee_khaki", "carhartt_cargo"),
 ]
 
 
@@ -257,6 +257,43 @@ def photo_rgba(raw_dir: Path, stem: str, m: dict, cfg: dict) -> np.ndarray:
                         float(m.get("open_frac", 0.0)), bool(m.get("smooth", False)))
 
 
+def torso_box(top: np.ndarray, cfg: dict) -> tuple[float, float, float, float]:
+    """Normalized torso box of a top canvas, measured from the hem at the CENTRE column.
+
+    fetch_garments.torso_region measures from the lowest garment row, which on a flat-laid hoodie is a sleeve
+    cuff hanging below the hem (it then returns a sleeve). Here the hem is the bottom of the centre column and
+    the torso is the contiguous column run around the centre whose alpha ends within TORSO_HEM_TOL of it.
+    Falls back to torso_region when that run is implausibly narrow."""
+    a = top[..., 3] > 127
+    h, w = a.shape
+    rows, cols = np.flatnonzero(a.any(axis=1)), np.flatnonzero(a.any(axis=0))
+    y0, y1 = int(rows[0]), int(rows[-1]) + 1
+    has = a.any(axis=0)
+    bottom = np.where(has, h - 1 - np.argmax(a[::-1], axis=0), -1)
+    cx = int(round(0.5 * (cols[0] + cols[-1])))
+    if not has[cx]:
+        cx = int(cols[np.argmin(np.abs(cols - cx))])
+    hem = int(bottom[cx])
+    torso = np.abs(bottom - hem) <= TORSO_HEM_TOL * (y1 - y0)      # cuffs hanging below the hem are excluded
+    x0 = cx
+    while x0 > 0 and torso[x0 - 1]:
+        x0 -= 1
+    x1 = cx + 1
+    while x1 < w and torso[x1]:
+        x1 += 1
+    if x1 - x0 < TORSO_MIN_FRAC * (cols[-1] + 1 - cols[0]):
+        return torso_region(top, cfg)
+    return (x0 / w, y0 / h, x1 / w, (hem + 1) / h)
+
+
+def _region(m: dict, front: np.ndarray, cfg: dict) -> tuple[float, float, float, float]:
+    """ITEMS `region` hint: explicit box, "hem_rows" (prepare_garments estimate, for sleeveless tops) or auto."""
+    r = m.get("region")
+    if r == "hem_rows":
+        return tuple(float(v) for v in estimate_body_region(front, cfg))
+    return tuple(float(v) for v in r) if r else torso_box(front, cfg)
+
+
 def load_item(key: str, raw_dir: Path, cfg: dict) -> dict:
     """Laid-out canvases of an ITEMS key: {kind, front, back, region, detail} (region/detail for tops only)."""
     m = ITEMS[key]
@@ -264,7 +301,7 @@ def load_item(key: str, raw_dir: Path, cfg: dict) -> dict:
     if m["kind"] == "top":
         front = layout_top(photo_rgba(raw_dir, key, m, cfg), cfg)
         back = layout_top(photo_rgba(raw_dir, f"{key}_back", m, cfg), cfg) if has_back else None
-        region = tuple(m.get("region") or torso_region(front, cfg))
+        region = _region(m, front, cfg)
         if m.get("flat_chroma"):
             front = flatten_chroma(front, float(m["print_dist"]))
         detail = print_mask(front, region, float(m["print_dist"])) if m.get("print_dist") and back is None else None
@@ -310,13 +347,14 @@ def sources_section(raw_dir: Path) -> str:
              "brand's or a retailer's own product photos (front + back flat-lay / ghost mannequin), downloaded by",
              "`scripts/fetch_garments_streetwear.py`, cut out, laid out and colour-boosted. **Copyrighted: "
              f"{NOTE}.** Raw downloads: `_raw_streetwear/`.", "",
-             "| garment | outfits | product page | front image | back image | note |", "|---|---|---|---|---|---|"]
+             "| garment | outfits | product page (shop) | front image | back image | note |", "|---|---|---|---|---|---|"]
     for key, s in sources.items():
         outfits = ", ".join(oid for oid, _, _, t, b in PAIRS if key in (t, b))
         if key not in ITEMS or not outfits:
             continue
         back = f"[back]({s['back_url']})" if s.get("back_url") else "synthesized"
-        lines.append(f"| {s['desc'].replace('|', '/')} | {outfits} | [{s['brand']}]({s['page_url']}) | "
+        host = s["page_url"].split("/")[2].removeprefix("www.")
+        lines.append(f"| {ITEMS[key]['desc'].replace('|', '/')} | {outfits} | [{host}]({s['page_url']}) | "
                      f"[front]({s['front_url']}) | {back} | {s['note']} |")
     return "\n".join(lines) + "\n"
 

@@ -1,0 +1,240 @@
+{
+  "stussy_tee_khaki": {
+    "brand": "Stussy",
+    "title": "BASIC STÜSSY TEE",
+    "desc": "Stussy Basic Stussy Tee, khaki (back: big script logo)",
+    "page_url": "https://www.stussy.com/products/1905000-basic-stussy-tee-khaki",
+    "front_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/1905000_KHAK_1.jpg?v=1768244266",
+    "back_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/1905000_KHAK_2.jpg?v=1768244265",
+    "files": [
+      "stussy_tee_khaki.jpg",
+      "stussy_tee_khaki_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "stussy_8ball_tee": {
+    "brand": "Stussy",
+    "title": "8 BALL TEE",
+    "desc": "Stussy 8 Ball Tee, natural (back: 8-ball graphic)",
+    "page_url": "https://www.stussy.com/products/1905022-8-ball-tee-natural",
+    "front_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/1905022_NATL_1.jpg?v=1773353784",
+    "back_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/1905022_NATL_2.jpg?v=1773353784",
+    "files": [
+      "stussy_8ball_tee.jpg",
+      "stussy_8ball_tee_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "stussy_hoodie_ash": {
+    "brand": "Stussy",
+    "title": "BASIC STÜSSY HOODIE",
+    "desc": "Stussy Basic Stussy Hoodie, ash heather (back: big script logo)",
+    "page_url": "https://www.stussy.com/products/1925000-basic-stussy-hoodie-ash-heather",
+    "front_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/1925000_ASHH_1.jpg?v=1785178397",
+    "back_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/1925000_ASHH_2.jpg?v=1785178397",
+    "files": [
+      "stussy_hoodie_ash.jpg",
+      "stussy_hoodie_ash_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "fog_hoodie": {
+    "brand": "Fear of God ESSENTIALS",
+    "title": "Essentials FW26 Classic Hoodie",
+    "desc": "Fear of God ESSENTIALS Classic Hoodie, oatmeal heather",
+    "page_url": "https://fearofgod.com/products/classic-hoodie-rw01501-oatmeal-heather",
+    "front_url": "https://cdn.shopify.com/s/files/1/1003/3354/files/RW01499-0108_CLASSIC_HOODIE-OATMEAL_HEATHER_LIGHT_HEATHER_1_5b156bce-b445-4997-b239-bee7366a38b4.jpg?v=1788973921",
+    "back_url": "https://cdn.shopify.com/s/files/1/1003/3354/files/RW01499-0108_CLASSIC_HOODIE-OATMEAL_HEATHER_LIGHT_HEATHER_2_5d1cef5c-f92c-4611-a06d-b368c36831fc.jpg?v=1788973921",
+    "files": [
+      "fog_hoodie.jpg",
+      "fog_hoodie_back.jpg"
+    ],
+    "size": [
+      1600,
+      2133
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "fog_tee": {
+    "brand": "Fear of God ESSENTIALS",
+    "title": "Essentials FW26 Classic Tee",
+    "desc": "Fear of God ESSENTIALS Classic Tee, warm heather",
+    "page_url": "https://fearofgod.com/products/classic-short-sleeve-tee-rw01496-warm-heather",
+    "front_url": "https://cdn.shopify.com/s/files/1/1003/3354/files/RW01496-0096_CLASSIC_SHORT_SLEEVE_TEE-WARM_HEATHER_1.jpg?v=1788967552",
+    "back_url": "https://cdn.shopify.com/s/files/1/1003/3354/files/RW01496-0096_CLASSIC_SHORT_SLEEVE_TEE-WARM_HEATHER_2.jpg?v=1788967552",
+    "files": [
+      "fog_tee.jpg",
+      "fog_tee_back.jpg"
+    ],
+    "size": [
+      1600,
+      2133
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "nike_tech_fleece": {
+    "brand": "Nike",
+    "title": "Sportswear Tech Fleece Full Zip Up Hoodie - Signal Blue/Black",
+    "desc": "Nike Sportswear Tech Fleece Full-Zip Hoodie, signal blue / black (CU4489-403)",
+    "page_url": "https://www.feature.com/products/nike-sportswear-tech-fleece-full-zip-up-hoodie-signal-blue-black",
+    "front_url": "https://cdn.shopify.com/s/files/1/0408/9909/files/6591489900615-P1-GRAYBG-CORRECTED_0561634f-484b-4b21-9564-f557200cde98.jpg?v=1789777017",
+    "back_url": "https://cdn.shopify.com/s/files/1/0408/9909/files/6591489900615-P2-GRAYBG-CORRECTED_cdffff31-d767-46ff-8800-513c958beff9.jpg?v=1789777017",
+    "files": [
+      "nike_tech_fleece.jpg",
+      "nike_tech_fleece_back.jpg"
+    ],
+    "size": [
+      1024,
+      1024
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "lakers_jersey": {
+    "brand": "Nike / Los Angeles Lakers",
+    "title": "Dončić Icon Swingman Jersey",
+    "desc": "Los Angeles Lakers Icon Swingman Jersey (Doncic #77), gold",
+    "page_url": "https://lakersstore.com/products/doncic-icon-swingman-jersey",
+    "front_url": "https://cdn.shopify.com/s/files/1/0259/7455/files/doncic_albert_icon_e13cedf1-684b-4a18-84c4-e1d014595dfa.png?v=1787766069",
+    "back_url": "https://cdn.shopify.com/s/files/1/0259/7455/files/2425_lal_mktg_doncic_mock_icon_back_1_mv.png?v=1738717614",
+    "files": [
+      "lakers_jersey.png",
+      "lakers_jersey_back.png"
+    ],
+    "size": [
+      1600,
+      1600
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "ch_hoodie": {
+    "brand": "Chrome Hearts",
+    "title": "Vertical Logo Hoodie",
+    "desc": "Chrome Hearts Vertical Logo Hoodie, orange (resale listing)",
+    "page_url": "https://justinreed.com/products/chrome-hearts-vertical-logo-hoodie-54684684684",
+    "front_url": "https://cdn.shopify.com/s/files/1/2400/1837/files/1_6038a1c4-4750-433c-8d75-5fa845d5c100.jpg?v=1791926141",
+    "back_url": "https://cdn.shopify.com/s/files/1/2400/1837/files/2_83f11018-2d00-4cd9-b96a-262db16c12ff.jpg?v=1791926141",
+    "files": [
+      "ch_hoodie.jpg",
+      "ch_hoodie_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "fog_sweatpant": {
+    "brand": "Fear of God ESSENTIALS",
+    "title": "Essentials FW26 Classic Sweatpant",
+    "desc": "Fear of God ESSENTIALS Classic Sweatpant, warm heather",
+    "page_url": "https://fearofgod.com/products/classic-sweatpant-rw01503-warm-heather",
+    "front_url": "https://cdn.shopify.com/s/files/1/1003/3354/files/RW01503-0096_CLASSIC_SWEATPANT-WARM_HEATHER_1.jpg?v=1788968804",
+    "back_url": "https://cdn.shopify.com/s/files/1/1003/3354/files/RW01503-0096_CLASSIC_SWEATPANT-WARM_HEATHER_2.jpg?v=1788968804",
+    "files": [
+      "fog_sweatpant.jpg",
+      "fog_sweatpant_back.jpg"
+    ],
+    "size": [
+      1600,
+      2133
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "stussy_bigol_jean": {
+    "brand": "Stussy",
+    "title": "BIG OL' JEAN DENIM",
+    "desc": "Stussy Big Ol' Jean, light wash indigo (baggy denim)",
+    "page_url": "https://www.stussy.com/products/116761-big-ol-jean-denim-light-wash-indigo",
+    "front_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/116761_LWAI_1.jpg?v=1785170971",
+    "back_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/116761_LWAI_2.jpg?v=1785170971",
+    "files": [
+      "stussy_bigol_jean.jpg",
+      "stussy_bigol_jean_back.jpg"
+    ],
+    "size": [
+      1599,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "stussy_fleece_pant": {
+    "brand": "Stussy",
+    "title": "FLEECE PANT",
+    "desc": "Stussy Fleece Pant, grey heather",
+    "page_url": "https://www.stussy.com/products/116812-fleece-pant-grey-heather",
+    "front_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/116812_GHEA_1.jpg?v=1789487012",
+    "back_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/116812_GHEA_2.jpg?v=1789487012",
+    "files": [
+      "stussy_fleece_pant.jpg",
+      "stussy_fleece_pant_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "stussy_track_pant": {
+    "brand": "Stussy",
+    "title": "SIDE STRIPE TRACK PANT",
+    "desc": "Stussy Side Stripe Track Pant, olive",
+    "page_url": "https://www.stussy.com/products/116785-side-stripe-track-pant-olive",
+    "front_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/116785_OLIV_1.jpg?v=1790359296",
+    "back_url": "https://cdn.shopify.com/s/files/1/0087/6193/3920/files/116785_OLIV_2.jpg?v=1790359296",
+    "files": [
+      "stussy_track_pant.jpg",
+      "stussy_track_pant_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "carhartt_cargo": {
+    "brand": "Carhartt WIP",
+    "title": "Carhartt WIP OG Cargo Pant (I037585), dusty H brown, stone washed",
+    "desc": "Carhartt WIP OG Cargo Pant (I037585), dusty H brown, stone washed",
+    "page_url": "https://www.carhartt-wip.com/en-de/p/og-cargo-pant-wip-dusty-h-stone-washed-46",
+    "front_url": "https://cdn.media.amplience.net/i/carhartt_wip/I037585_3TF_06-ST-02",
+    "back_url": "https://cdn.media.amplience.net/i/carhartt_wip/I037585_3TF_06-ST-01",
+    "files": [
+      "carhartt_cargo.png",
+      "carhartt_cargo_back.png"
+    ],
+    "size": [
+      1600,
+      1600
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  },
+  "ch_cross_jeans": {
+    "brand": "Chrome Hearts",
+    "title": "Levi's 517 Orange Tab Cross Patch Jeans",
+    "desc": "Chrome Hearts x Levi's 517 Orange Tab Cross Patch Jeans (pink leather crosses, resale)",
+    "page_url": "https://justinreed.com/products/chrome-hearts-levis-517-orange-tab-cross-patch-jeans-58962478541845448",
+    "front_url": "https://cdn.shopify.com/s/files/1/2400/1837/files/1_e1baf451-bf70-4ba9-95b0-64227fd85118.jpg?v=1792099132",
+    "back_url": "https://cdn.shopify.com/s/files/1/2400/1837/files/2_a12160ee-ad53-4697-9cd1-4c6da12e6551.jpg?v=1792099132",
+    "files": [
+      "ch_cross_jeans.jpg",
+      "ch_cross_jeans_back.jpg"
+    ],
+    "size": [
+      1600,
+      2000
+    ],
+    "note": "retailer product photo, demo use only, not for redistribution"
+  }
+}

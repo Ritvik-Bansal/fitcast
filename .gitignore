@@ -34,3 +34,6 @@ assets/garments/_raw_tops/*
 !assets/garments/_raw_bottoms/
 assets/garments/_raw_bottoms/*
 !assets/garments/_raw_bottoms/sources.json
+!assets/garments/_raw_streetwear/
+assets/garments/_raw_streetwear/*
+!assets/garments/_raw_streetwear/sources.json
